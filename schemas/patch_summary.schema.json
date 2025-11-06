@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Patch Summary",
+  "type": "object",
+  "properties": {
+    "patch_id": {
+      "type": "string",
+      "description": "Unique identifier for the patch"
+    },
+    "files_changed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "changes": {
+      "type": "object",
+      "properties": {
+        "additions": {
+          "type": "integer"
+        },
+        "deletions": {
+          "type": "integer"
+        }
+      }
+    },
+    "description": {
+      "type": "string"
+    }
+  },
+  "required": ["patch_id", "files_changed"]
+}
