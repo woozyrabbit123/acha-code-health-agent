@@ -10,6 +10,7 @@ from agents.analysis_agent import AnalysisAgent
 from agents.refactor_agent import RefactorAgent
 from agents.validation_agent import ValidationAgent
 from utils.checkpoint import checkpoint, restore
+from utils.exporter import build_proof_pack
 
 
 def analyze(args):
@@ -176,9 +177,20 @@ def validate(args):
 
 
 def export(args):
-    """Export results"""
-    print("export command - not implemented yet")
-    return 0
+    """Export results to proof pack"""
+    print("Building proof pack...")
+
+    try:
+        zip_path = build_proof_pack()
+        print(f"\n✓ Proof pack created successfully!")
+        print(zip_path)
+        return 0
+    except FileNotFoundError as e:
+        print(f"✗ Error: {e}")
+        return 1
+    except Exception as e:
+        print(f"✗ Error creating proof pack: {e}")
+        return 1
 
 
 def run(args):
