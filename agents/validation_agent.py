@@ -55,7 +55,8 @@ class ValidationAgent:
                 "status": "error",
                 "duration_s": duration,
                 "tests_run": 0,
-                "failing_tests": ["Test execution timed out"]
+                "failing_tests": ["Test execution timed out"],
+                "validate_dir": workdir
             }
         except Exception as e:
             duration = time.time() - start_time
@@ -64,7 +65,8 @@ class ValidationAgent:
                 "status": "error",
                 "duration_s": duration,
                 "tests_run": 0,
-                "failing_tests": [f"Test execution failed: {str(e)}"]
+                "failing_tests": [f"Test execution failed: {str(e)}"],
+                "validate_dir": workdir
             }
 
         # Calculate duration
@@ -96,7 +98,8 @@ class ValidationAgent:
             "status": status,
             "duration_s": round(duration, 3),
             "tests_run": tests_run,
-            "failing_tests": failing_tests
+            "failing_tests": failing_tests,
+            "validate_dir": workdir
         }
 
     def _parse_pytest_output(self, stdout: str, stderr: str) -> tuple:
