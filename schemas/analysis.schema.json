@@ -1,36 +1,59 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Analysis Result",
+  "title": "Analysis Report",
   "type": "object",
   "properties": {
-    "file_path": {
-      "type": "string",
-      "description": "Path to the analyzed file"
-    },
-    "issues": {
+    "findings": {
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
-          "severity": {
+          "id": {
             "type": "string",
-            "enum": ["low", "medium", "high", "critical"]
+            "description": "Unique identifier for the finding (e.g., ANL-001)"
           },
-          "message": {
-            "type": "string"
+          "file": {
+            "type": "string",
+            "description": "Relative path to the file containing the finding"
           },
-          "line": {
-            "type": "integer"
+          "start_line": {
+            "type": "integer",
+            "description": "Starting line number of the finding"
+          },
+          "end_line": {
+            "type": "integer",
+            "description": "Ending line number of the finding"
+          },
+          "finding": {
+            "type": "string",
+            "enum": ["dup_immutable_const", "long_function", "style_violation", "risky_construct"],
+            "description": "Type of finding detected"
+          },
+          "severity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Severity score from 0 (lowest) to 1 (highest)"
+          },
+          "fix_type": {
+            "type": "string",
+            "description": "Suggested fix type"
+          },
+          "rationale": {
+            "type": "string",
+            "description": "Explanation of why this is flagged"
+          },
+          "test_hints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Hints for testing the fix"
           }
         },
-        "required": ["severity", "message"]
+        "required": ["id", "file", "start_line", "end_line", "finding", "severity", "fix_type", "rationale", "test_hints"]
       }
-    },
-    "score": {
-      "type": "number",
-      "minimum": 0,
-      "maximum": 100
     }
   },
-  "required": ["file_path", "issues"]
+  "required": ["findings"]
 }
