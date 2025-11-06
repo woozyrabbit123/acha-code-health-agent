@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from agents.analysis_agent import AnalysisAgent
 from agents.refactor_agent import RefactorAgent
+from agents.validation_agent import ValidationAgent
+from utils.checkpoint import checkpoint, restore
 
 
 def analyze(args):
@@ -97,8 +99,80 @@ def refactor(args):
 
 def validate(args):
     """Run validation"""
-    print("validate command - not implemented yet")
-    return 0
+    target_dir = args.target
+
+    # Determine which directory to validate
+    workdir_path = Path("workdir")
+    if workdir_path.exists():
+        validate_dir = str(workdir_path)
+        print(f"Validating refactored code in: {validate_dir}")
+    else:
+        validate_dir = target_dir
+        print(f"No workdir found, validating original code in: {validate_dir}")
+
+    # Load patch_id from patch_summary.json if available
+    patch_id = "no-patch"
+    patch_summary_path = Path("reports/patch_summary.json")
+    if patch_summary_path.exists():
+        with open(patch_summary_path, 'r', encoding='utf-8') as f:
+            patch_summary = json.load(f)
+            patch_id = patch_summary.get('patch_id', 'no-patch')
+
+    # Create checkpoint before validation
+    checkpoint_dir = ".checkpoints/LATEST"
+    print(f"Creating checkpoint at: {checkpoint_dir}")
+    try:
+        checkpoint(validate_dir, checkpoint_dir)
+    except Exception as e:
+        print(f"Warning: Failed to create checkpoint: {e}")
+
+    # Run validation
+    agent = ValidationAgent()
+    print(f"Running tests with patch_id: {patch_id}")
+
+    try:
+        result = agent.run(validate_dir, patch_id)
+    except Exception as e:
+        print(f"Error during validation: {e}")
+        return 1
+
+    # Ensure reports directory exists
+    reports_dir = Path("reports")
+    reports_dir.mkdir(exist_ok=True)
+
+    # Write results to reports/validate.json
+    validate_path = reports_dir / "validate.json"
+    with open(validate_path, 'w', encoding='utf-8') as f:
+        json.dump(result, f, indent=2)
+
+    # Print summary
+    print(f"\nValidation complete!")
+    print(f"Status: {result['status'].upper()}")
+    print(f"Tests run: {result['tests_run']}")
+    print(f"Duration: {result['duration_s']}s")
+    print(f"Report written to: {validate_path}")
+    print(f"Test output saved to: reports/test_output.txt")
+
+    # Handle failure - restore from checkpoint
+    if result['status'] == 'fail':
+        print(f"\nTests FAILED - {len(result['failing_tests'])} failing test(s)")
+        for test in result['failing_tests']:
+            print(f"  - {test}")
+
+        print(f"\nRestoring from checkpoint...")
+        try:
+            restore(checkpoint_dir, ".")
+            print("✓ Restored to pre-refactor state")
+        except Exception as e:
+            print(f"✗ Failed to restore: {e}")
+
+        return 1
+    elif result['status'] == 'pass':
+        print("\n✓ All tests passed!")
+        return 0
+    else:
+        print(f"\n✗ Validation error")
+        return 1
 
 
 def export(args):
@@ -134,6 +208,7 @@ def main():
 
     # validate subcommand
     parser_validate = subparsers.add_parser('validate', help='Validate changes')
+    parser_validate.add_argument('--target', required=True, help='Target directory to validate')
     parser_validate.set_defaults(func=validate)
 
     # export subcommand
