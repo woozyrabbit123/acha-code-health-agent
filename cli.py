@@ -159,9 +159,9 @@ def validate(args):
         for test in result['failing_tests']:
             print(f"  - {test}")
 
-        print(f"\nRestoring from checkpoint...")
+        print(f"\nRestoring from checkpoint to: {validate_dir}")
         try:
-            restore(checkpoint_dir, ".")
+            restore(checkpoint_dir, validate_dir)
             print("✓ Restored to pre-refactor state")
         except Exception as e:
             print(f"✗ Failed to restore: {e}")

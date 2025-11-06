@@ -54,12 +54,21 @@ def test_string():
         assert len(result['failing_tests']) == 0, "Should have no failing tests"
         assert result['patch_id'] == "test-patch-001"
 
+        # Verify result includes validate_dir
+        assert 'validate_dir' in result, "Result should include validate_dir"
+        assert result['validate_dir'] == str(tmpdir_path), "validate_dir should match input directory"
+
 
 def test_validation_agent_failing_tests():
     """Test ValidationAgent with failing tests and checkpoint restore"""
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
+
+        # Create a marker file to track restoration
+        marker_file = tmpdir_path / "marker.txt"
+        original_marker_content = "ORIGINAL_SNAPSHOT_DATA"
+        marker_file.write_text(original_marker_content)
 
         # Create a module with actual code
         code_file = tmpdir_path / "calculator.py"
@@ -87,9 +96,12 @@ def test_multiply():
 '''
         test_file.write_text(test_code)
 
-        # Create checkpoint
+        # Create checkpoint BEFORE any modifications
         checkpoint_path = tmpdir_path / ".checkpoint"
         checkpoint(str(tmpdir_path), str(checkpoint_path))
+
+        # Modify the marker file (simulate changes during validation)
+        marker_file.write_text("MODIFIED_DURING_RUN")
 
         # Modify the code file (simulate a bad refactor)
         code_file.write_text('''"""Calculator module - broken"""
@@ -111,10 +123,21 @@ def multiply(a, b):
         assert len(result['failing_tests']) > 0, "Should have failing tests"
         assert result['patch_id'] == "test-patch-002"
 
-        # Restore from checkpoint
+        # Verify result includes validate_dir
+        assert 'validate_dir' in result, "Result should include validate_dir"
+        assert result['validate_dir'] == str(tmpdir_path), "validate_dir should match input directory"
+
+        # Restore from checkpoint to the SAME directory
         restore(str(checkpoint_path), str(tmpdir_path))
 
-        # Verify restoration - the original code should be back
+        # Verify restoration - marker file should be back to original
+        with open(marker_file, 'r') as f:
+            restored_marker = f.read()
+
+        assert restored_marker == original_marker_content, \
+            f"Marker file should be restored. Expected '{original_marker_content}', got '{restored_marker}'"
+
+        # Verify code file restoration
         with open(code_file, 'r') as f:
             restored_content = f.read()
 
