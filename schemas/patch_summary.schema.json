@@ -5,28 +5,30 @@
   "properties": {
     "patch_id": {
       "type": "string",
-      "description": "Unique identifier for the patch"
+      "description": "Unique identifier for the patch (UUID)"
     },
-    "files_changed": {
+    "files_touched": {
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "description": "List of files modified by this patch"
     },
-    "changes": {
-      "type": "object",
-      "properties": {
-        "additions": {
-          "type": "integer"
-        },
-        "deletions": {
-          "type": "integer"
-        }
-      }
+    "lines_added": {
+      "type": "integer",
+      "description": "Number of lines added"
     },
-    "description": {
-      "type": "string"
+    "lines_removed": {
+      "type": "integer",
+      "description": "Number of lines removed"
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Additional notes about the patch"
     }
   },
-  "required": ["patch_id", "files_changed"]
+  "required": ["patch_id", "files_touched", "lines_added", "lines_removed", "notes"]
 }

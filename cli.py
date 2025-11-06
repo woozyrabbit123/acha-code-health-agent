@@ -7,6 +7,7 @@ import json
 import sys
 from pathlib import Path
 from agents.analysis_agent import AnalysisAgent
+from agents.refactor_agent import RefactorAgent
 
 
 def analyze(args):
@@ -54,7 +55,43 @@ def analyze(args):
 
 def refactor(args):
     """Run code refactoring"""
-    print("refactor command - not implemented yet")
+    target_dir = args.target
+    analysis_path = args.analysis
+
+    print(f"Refactoring code in: {target_dir}")
+    print(f"Using analysis from: {analysis_path}")
+
+    # Run refactoring
+    agent = RefactorAgent()
+    try:
+        patch_summary = agent.apply(target_dir, analysis_path)
+    except Exception as e:
+        print(f"Error during refactoring: {e}")
+        return 1
+
+    # Ensure reports directory exists
+    reports_dir = Path("reports")
+    reports_dir.mkdir(exist_ok=True)
+
+    # Write patch summary to reports/patch_summary.json
+    summary_path = reports_dir / "patch_summary.json"
+    with open(summary_path, 'w', encoding='utf-8') as f:
+        json.dump(patch_summary, f, indent=2)
+
+    # Print summary
+    print(f"\nRefactoring complete!")
+    print(f"Patch ID: {patch_summary['patch_id']}")
+    print(f"Files touched: {len(patch_summary['files_touched'])}")
+    print(f"Lines added: {patch_summary['lines_added']}")
+    print(f"Lines removed: {patch_summary['lines_removed']}")
+    print(f"Diff written to: dist/patch.diff")
+    print(f"Summary written to: {summary_path}")
+
+    if patch_summary.get('notes'):
+        print("\nNotes:")
+        for note in patch_summary['notes']:
+            print(f"  - {note}")
+
     return 0
 
 
@@ -91,6 +128,8 @@ def main():
 
     # refactor subcommand
     parser_refactor = subparsers.add_parser('refactor', help='Refactor code')
+    parser_refactor.add_argument('--target', required=True, help='Target directory to refactor')
+    parser_refactor.add_argument('--analysis', required=True, help='Path to analysis.json file')
     parser_refactor.set_defaults(func=refactor)
 
     # validate subcommand
