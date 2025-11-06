@@ -1,0 +1,33 @@
+{
+  "findings": [
+    {
+      "id": "ANL-001",
+      "file": "example.py",
+      "start_line": 4,
+      "end_line": 4,
+      "finding": "dup_immutable_const",
+      "severity": 0.4,
+      "fix_type": "inline_const",
+      "rationale": "Constant 'API_KEY' with value 'secret-key-12345' is referenced 5 times. Consider inlining or using a more descriptive pattern.",
+      "test_hints": [
+        "Verify all 5 usages of 'API_KEY' still work after refactoring",
+        "Ensure the constant value is correctly inlined in all locations"
+      ]
+    },
+    {
+      "id": "ANL-002",
+      "file": "example.py",
+      "start_line": 31,
+      "end_line": 31,
+      "finding": "risky_construct",
+      "severity": 0.9,
+      "fix_type": "remove_or_wrap",
+      "rationale": "Use of 'eval' detected. This is a dangerous construct that can execute arbitrary code.",
+      "test_hints": [
+        "Remove 'eval' and use safer alternatives",
+        "If necessary, wrap with strict input validation",
+        "Consider using ast.literal_eval for safe evaluation"
+      ]
+    }
+  ]
+}
