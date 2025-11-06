@@ -9,7 +9,7 @@
     },
     "status": {
       "type": "string",
-      "enum": ["passed", "failed", "error"],
+      "enum": ["pass", "fail", "error"],
       "description": "Overall validation status"
     },
     "duration_s": {
