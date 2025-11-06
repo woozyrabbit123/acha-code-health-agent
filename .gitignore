@@ -210,3 +210,7 @@ __marimo__/
 workdir/
 .checkpoints/
 reports/test_output.txt
+
+# Test artifacts
+/analysis.json
+/syntax_test.py
