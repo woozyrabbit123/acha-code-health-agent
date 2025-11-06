@@ -1,6 +1,8 @@
 """Validation Agent - runs tests and validates changes"""
+import os
 import re
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Dict, List, Any
@@ -33,41 +35,76 @@ class ValidationAgent:
         if not workdir_path.exists():
             raise ValueError(f"Working directory does not exist: {workdir}")
 
-        # Start timer
-        start_time = time.time()
-
-        # Run tests
+        # Create a temporary pytest.ini in the validate_dir to scope pytest
+        temp_cfg_path = None
+        temp_cfg_fd = None
         try:
-            result = subprocess.run(
-                test_cmd.split(),
-                cwd=workdir,
-                capture_output=True,
-                text=True,
-                timeout=60  # Overall timeout for the subprocess
+            temp_cfg_fd, temp_cfg_path = tempfile.mkstemp(
+                suffix=".ini",
+                dir=workdir,
+                text=True
             )
-            stdout = result.stdout
-            stderr = result.stderr
-            exit_code = result.returncode
-        except subprocess.TimeoutExpired:
-            duration = time.time() - start_time
-            return {
-                "patch_id": patch_id,
-                "status": "error",
-                "duration_s": duration,
-                "tests_run": 0,
-                "failing_tests": ["Test execution timed out"],
-                "validate_dir": workdir
-            }
-        except Exception as e:
-            duration = time.time() - start_time
-            return {
-                "patch_id": patch_id,
-                "status": "error",
-                "duration_s": duration,
-                "tests_run": 0,
-                "failing_tests": [f"Test execution failed: {str(e)}"],
-                "validate_dir": workdir
-            }
+            # Write minimal pytest config
+            os.write(temp_cfg_fd, b"[pytest]\n")
+            os.close(temp_cfg_fd)
+            temp_cfg_fd = None  # Mark as closed
+
+            # Build scoped pytest command
+            # --confcutdir=. limits config search to current directory
+            # -c <config> specifies the config file to use
+            cfg_filename = os.path.basename(temp_cfg_path)
+            scoped_cmd = [
+                "python", "-m", "pytest", "-q", "--timeout=30",
+                "--confcutdir=.", "-c", cfg_filename
+            ]
+
+            # Start timer
+            start_time = time.time()
+
+            # Run tests
+            try:
+                result = subprocess.run(
+                    scoped_cmd,
+                    cwd=workdir,
+                    capture_output=True,
+                    text=True,
+                    timeout=60  # Overall timeout for the subprocess
+                )
+                stdout = result.stdout
+                stderr = result.stderr
+                exit_code = result.returncode
+            except subprocess.TimeoutExpired:
+                duration = time.time() - start_time
+                return {
+                    "patch_id": patch_id,
+                    "status": "error",
+                    "duration_s": duration,
+                    "tests_run": 0,
+                    "failing_tests": ["Test execution timed out"],
+                    "validate_dir": workdir
+                }
+            except Exception as e:
+                duration = time.time() - start_time
+                return {
+                    "patch_id": patch_id,
+                    "status": "error",
+                    "duration_s": duration,
+                    "tests_run": 0,
+                    "failing_tests": [f"Test execution failed: {str(e)}"],
+                    "validate_dir": workdir
+                }
+        finally:
+            # Clean up temporary config file
+            if temp_cfg_fd is not None:
+                try:
+                    os.close(temp_cfg_fd)
+                except:
+                    pass
+            if temp_cfg_path and os.path.exists(temp_cfg_path):
+                try:
+                    os.unlink(temp_cfg_path)
+                except:
+                    pass
 
         # Calculate duration
         duration = time.time() - start_time
