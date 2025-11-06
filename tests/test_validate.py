@@ -217,3 +217,54 @@ def test_validation_agent_with_no_tests():
         assert result['patch_id'] == "test-patch-003"
         # Status depends on pytest behavior with no tests
         assert result['tests_run'] >= 0
+
+
+def test_validator_ignores_parent_pytest_ini():
+    """Test that ValidationAgent ignores parent directory pytest.ini"""
+
+    # Save current repo pytest.ini content if it exists
+    repo_pytest_ini = Path("pytest.ini")
+    original_content = None
+    if repo_pytest_ini.exists():
+        with open(repo_pytest_ini, 'r') as f:
+            original_content = f.read()
+
+    try:
+        # Create a misleading pytest.ini at repo root
+        misleading_config = "[pytest]\ntestpaths = nonexistent_dir\n"
+        with open(repo_pytest_ini, 'w') as f:
+            f.write(misleading_config)
+
+        # Create a temp target project with a passing test
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+
+            test_file = tmpdir_path / "test_isolated.py"
+            test_code = '''"""Isolated test"""
+
+def test_passes():
+    assert True
+
+def test_also_passes():
+    assert 1 + 1 == 2
+'''
+            test_file.write_text(test_code)
+
+            # Run validation - should find and run tests in tmpdir only
+            agent = ValidationAgent()
+            result = agent.run(str(tmpdir_path), patch_id="test-patch-isolation")
+
+            # Verify it ran the tests successfully
+            assert result['status'] == 'pass', \
+                f"Expected pass, got {result['status']}. Validator may be leaking to parent pytest.ini"
+            assert result['tests_run'] >= 1, \
+                f"Expected at least 1 test, got {result['tests_run']}. Validator may be using parent config"
+            assert result['patch_id'] == "test-patch-isolation"
+
+    finally:
+        # Restore original pytest.ini
+        if original_content is not None:
+            with open(repo_pytest_ini, 'w') as f:
+                f.write(original_content)
+        elif repo_pytest_ini.exists():
+            repo_pytest_ini.unlink()
