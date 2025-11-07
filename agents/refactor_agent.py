@@ -1,19 +1,48 @@
 """Refactor Agent - applies safe transformations"""
 import ast
 import json
+import re
 import uuid
+from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Set
 from utils.patcher import Patcher
+from utils.import_analyzer import classify_import, get_unused_imports, collect_import_usage
+
+
+class RefactorType(Enum):
+    """Types of refactorings available"""
+    INLINE_CONST = "inline_const"
+    REMOVE_UNUSED_IMPORT = "remove_unused_import"
+    ORGANIZE_IMPORTS = "organize_imports"
+    HARDEN_SUBPROCESS = "harden_subprocess"
 
 
 class RefactorAgent:
     """Agent for refactoring code based on analysis findings"""
 
-    def __init__(self):
+    def __init__(self, refactor_types: Optional[List[str]] = None):
+        """
+        Initialize RefactorAgent.
+
+        Args:
+            refactor_types: List of refactor type strings to apply.
+                           Defaults to ["inline_const", "remove_unused_import"]
+        """
         self.patcher = Patcher()
         self.modifications = {}
         self.notes = []
+
+        # Parse refactor types
+        if refactor_types is None:
+            refactor_types = ["inline_const", "remove_unused_import"]
+
+        self.enabled_refactors: Set[RefactorType] = set()
+        for rt in refactor_types:
+            try:
+                self.enabled_refactors.add(RefactorType(rt))
+            except ValueError:
+                self.notes.append(f"Unknown refactor type: {rt}")
 
     def apply(self, target_dir: str, analysis_json_path: str) -> Dict[str, Any]:
         """
@@ -40,20 +69,42 @@ class RefactorAgent:
 
         findings = analysis.get('findings', [])
 
-        # Filter for dup_immutable_const findings
-        dup_const_findings = [
-            f for f in findings if f.get('finding') == 'dup_immutable_const'
-        ]
-
         self.modifications = {}
         self.notes = []
+        refactor_types_applied = []
 
         # Prepare workdir
         self.patcher.prepare_workdir(target_dir)
 
-        # Process each finding
-        for finding in dup_const_findings:
-            self._process_dup_const_finding(finding, target_path)
+        # Process findings based on enabled refactor types
+        if RefactorType.INLINE_CONST in self.enabled_refactors:
+            dup_const_findings = [
+                f for f in findings if f.get('finding') == 'dup_immutable_const'
+            ]
+            for finding in dup_const_findings:
+                self._process_dup_const_finding(finding, target_path)
+            if dup_const_findings:
+                refactor_types_applied.append("inline_const")
+
+        if RefactorType.REMOVE_UNUSED_IMPORT in self.enabled_refactors:
+            unused_import_findings = [
+                f for f in findings if f.get('finding') == 'unused_import'
+            ]
+            self._process_unused_imports(unused_import_findings, target_path)
+            if unused_import_findings:
+                refactor_types_applied.append("remove_unused_import")
+
+        if RefactorType.ORGANIZE_IMPORTS in self.enabled_refactors:
+            self._organize_all_imports(target_path)
+            refactor_types_applied.append("organize_imports")
+
+        if RefactorType.HARDEN_SUBPROCESS in self.enabled_refactors:
+            subprocess_findings = [
+                f for f in findings if f.get('finding') == 'broad_subprocess_shell'
+            ]
+            self._process_subprocess_hardening(subprocess_findings, target_path)
+            if subprocess_findings:
+                refactor_types_applied.append("harden_subprocess")
 
         # Generate and write diff
         all_diffs = []
@@ -81,7 +132,8 @@ class RefactorAgent:
             'files_touched': list(self.modifications.keys()),
             'lines_added': lines_added,
             'lines_removed': lines_removed,
-            'notes': self.notes
+            'notes': self.notes,
+            'refactor_types_applied': refactor_types_applied
         }
 
         return patch_summary
@@ -134,6 +186,201 @@ class RefactorAgent:
             self.notes.append(f"Inlined constant '{const_name}' in {file_path}")
         else:
             self.notes.append(f"No changes for constant '{const_name}' in {file_path}")
+
+    def _process_unused_imports(self, findings: List[Dict[str, Any]], target_path: Path):
+        """Remove unused imports from files"""
+        # Group findings by file
+        files_with_unused = {}
+        for finding in findings:
+            file_path = finding.get('file')
+            line = finding.get('start_line')
+            if file_path and line:
+                if file_path not in files_with_unused:
+                    files_with_unused[file_path] = []
+                files_with_unused[file_path].append(line)
+
+        for file_path, unused_lines in files_with_unused.items():
+            self._remove_unused_imports_from_file(file_path, set(unused_lines), target_path)
+
+    def _remove_unused_imports_from_file(self, file_path: str, unused_lines: Set[int], target_path: Path):
+        """Remove unused imports from a single file"""
+        source_file = target_path / file_path
+
+        if not source_file.exists():
+            return
+
+        try:
+            with open(source_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+                lines = content.split('\n')
+        except Exception:
+            return
+
+        # Remove lines with unused imports
+        modified_lines = []
+        for i, line in enumerate(lines, start=1):
+            if i not in unused_lines:
+                modified_lines.append(line)
+
+        modified_content = '\n'.join(modified_lines)
+
+        if modified_content != content:
+            self.modifications[file_path] = modified_content
+            self.notes.append(f"Removed {len(unused_lines)} unused import(s) from {file_path}")
+
+    def _organize_all_imports(self, target_path: Path):
+        """Organize imports in all Python files"""
+        python_files = list(target_path.rglob("*.py"))
+
+        for py_file in python_files:
+            relative_path = str(py_file.relative_to(target_path))
+            self._organize_imports_in_file(relative_path, target_path)
+
+    def _organize_imports_in_file(self, file_path: str, target_path: Path):
+        """Organize imports in a single file"""
+        source_file = target_path / file_path
+
+        if not source_file.exists():
+            return
+
+        try:
+            with open(source_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except Exception:
+            return
+
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            return
+
+        # Find all imports at module level
+        imports = {'stdlib': [], 'third_party': [], 'local': []}
+        non_import_start = 0
+
+        for i, node in enumerate(tree.body):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                # Classify and store
+                if isinstance(node, ast.Import):
+                    module = node.names[0].name
+                else:
+                    module = node.module or ''
+
+                classification = classify_import(module)
+                imports[classification].append(ast.unparse(node))
+            else:
+                # First non-import node
+                non_import_start = i
+                break
+
+        # If no imports to organize, skip
+        if not any(imports.values()):
+            return
+
+        # Build organized import section
+        organized_imports = []
+
+        # Sort within each group and deduplicate
+        for group in ['stdlib', 'third_party', 'local']:
+            group_imports = sorted(set(imports[group]))
+            if group_imports:
+                organized_imports.extend(group_imports)
+                organized_imports.append('')  # Blank line between groups
+
+        # Remove trailing blank line
+        while organized_imports and organized_imports[-1] == '':
+            organized_imports.pop()
+
+        # Reconstruct file
+        lines = content.split('\n')
+
+        # Find the line where imports end
+        import_end_line = 0
+        for node in tree.body[:non_import_start]:
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                import_end_line = max(import_end_line, node.end_lineno or node.lineno)
+
+        # Keep module docstring if present
+        docstring_lines = []
+        if tree.body and isinstance(tree.body[0], ast.Expr) and isinstance(tree.body[0].value, (ast.Str, ast.Constant)):
+            # Has docstring
+            docstring_node = tree.body[0]
+            docstring_end = docstring_node.end_lineno or docstring_node.lineno
+            docstring_lines = lines[:docstring_end]
+            docstring_lines.append('')  # Blank line after docstring
+
+        # Rest of the code (after imports)
+        rest_of_code = lines[import_end_line:] if import_end_line < len(lines) else []
+
+        # Remove leading blank lines from rest of code
+        while rest_of_code and not rest_of_code[0].strip():
+            rest_of_code.pop(0)
+
+        # Combine
+        if docstring_lines:
+            modified_lines = docstring_lines + organized_imports + ['', ''] + rest_of_code
+        else:
+            modified_lines = organized_imports + ['', ''] + rest_of_code
+
+        modified_content = '\n'.join(modified_lines)
+
+        if modified_content != content:
+            self.modifications[file_path] = modified_content
+            self.notes.append(f"Organized imports in {file_path}")
+
+    def _process_subprocess_hardening(self, findings: List[Dict[str, Any]], target_path: Path):
+        """Harden subprocess calls by removing shell=True"""
+        files_with_subprocess = {}
+        for finding in findings:
+            file_path = finding.get('file')
+            line = finding.get('start_line')
+            if file_path and line:
+                if file_path not in files_with_subprocess:
+                    files_with_subprocess[file_path] = []
+                files_with_subprocess[file_path].append(line)
+
+        for file_path, lines_to_fix in files_with_subprocess.items():
+            self._harden_subprocess_in_file(file_path, set(lines_to_fix), target_path)
+
+    def _harden_subprocess_in_file(self, file_path: str, lines_to_fix: Set[int], target_path: Path):
+        """Harden subprocess calls in a single file"""
+        source_file = target_path / file_path
+
+        if not source_file.exists():
+            return
+
+        try:
+            with open(source_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+                lines = content.split('\n')
+        except Exception:
+            return
+
+        # Remove shell=True from lines
+        modified = False
+        modified_lines = lines[:]
+
+        for line_num in lines_to_fix:
+            if 0 < line_num <= len(modified_lines):
+                idx = line_num - 1
+                line = modified_lines[idx]
+
+                # Remove shell=True
+                new_line = re.sub(r',?\s*shell\s*=\s*True\s*,?', '', line)
+
+                # Add check=False if not present
+                if 'check=' not in new_line and 'subprocess.' in new_line:
+                    # Add check=False before the closing paren
+                    new_line = re.sub(r'\)', ', check=False)', new_line)
+
+                if new_line != line:
+                    modified_lines[idx] = new_line
+                    modified = True
+
+        if modified:
+            modified_content = '\n'.join(modified_lines)
+            self.modifications[file_path] = modified_content
+            self.notes.append(f"Hardened subprocess calls in {file_path}")
 
     def _find_constant_at_line(self, tree: ast.AST, line_num: int) -> Optional[Dict[str, Any]]:
         """Find the constant definition at the specified line"""
