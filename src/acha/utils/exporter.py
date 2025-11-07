@@ -5,6 +5,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any
 from jsonschema import validate, ValidationError
+try:
+    from importlib import resources
+except ImportError:
+    import importlib_resources as resources
 
 
 def build_proof_pack(
@@ -37,17 +41,17 @@ def build_proof_pack(
     # Load and validate required JSON files
     analysis_data = _load_and_validate_json(
         reports_path / "analysis.json",
-        Path("schemas/analysis.schema.json")
+        "analysis.schema.json"
     )
 
     patch_summary_data = _load_and_validate_json(
         reports_path / "patch_summary.json",
-        Path("schemas/patch_summary.schema.json")
+        "patch_summary.schema.json"
     )
 
     validate_data = _load_and_validate_json(
         reports_path / "validate.json",
-        Path("schemas/validate.schema.json")
+        "validate.schema.json"
     )
 
     # Generate report.md
@@ -92,13 +96,13 @@ def build_proof_pack(
     return str(zip_path.resolve())
 
 
-def _load_and_validate_json(json_path: Path, schema_path: Path) -> Dict[str, Any]:
+def _load_and_validate_json(json_path: Path, schema_name: str) -> Dict[str, Any]:
     """
     Load a JSON file and validate it against a schema.
 
     Args:
         json_path: Path to JSON file
-        schema_path: Path to JSON schema file
+        schema_name: Name of schema file in acha.schemas package
 
     Returns:
         Loaded JSON data
@@ -110,14 +114,17 @@ def _load_and_validate_json(json_path: Path, schema_path: Path) -> Dict[str, Any
     if not json_path.exists():
         raise FileNotFoundError(f"Required file not found: {json_path}")
 
-    if not schema_path.exists():
-        raise FileNotFoundError(f"Schema file not found: {schema_path}")
-
     with open(json_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
-    with open(schema_path, 'r', encoding='utf-8') as f:
-        schema = json.load(f)
+    # Load schema from package resources
+    try:
+        schema_files = resources.files("acha.schemas")
+        schema_path = schema_files.joinpath(schema_name)
+        with schema_path.open("r", encoding="utf-8") as f:
+            schema = json.load(f)
+    except Exception as e:
+        raise FileNotFoundError(f"Schema file not found: {schema_name}") from e
 
     validate(instance=data, schema=schema)
     return data

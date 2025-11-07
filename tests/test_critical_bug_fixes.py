@@ -1,8 +1,8 @@
 """Regression tests for critical bug fixes"""
 import tempfile
 from pathlib import Path
-from utils.policy import PolicyConfig, PolicyEnforcer
-from agents.refactor_agent import RefactorAgent
+from acha.utils.policy import PolicyConfig, PolicyEnforcer
+from acha.agents.refactor_agent import RefactorAgent
 import json
 
 

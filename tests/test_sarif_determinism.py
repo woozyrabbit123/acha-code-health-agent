@@ -1,7 +1,7 @@
 """Regression tests for SARIF determinism issues"""
 from pathlib import Path
 import tempfile
-from utils.sarif_reporter import SARIFReporter
+from acha.utils.sarif_reporter import SARIFReporter
 
 
 def test_sarif_rule_ids_deterministic():

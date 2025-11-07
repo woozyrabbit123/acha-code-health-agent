@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from jsonschema import ValidationError
 
-from utils.exporter import build_proof_pack
+from acha.utils.exporter import build_proof_pack
 
 
 def test_build_proof_pack_with_all_files():

@@ -4,8 +4,8 @@ import shutil
 import tempfile
 import textwrap
 from pathlib import Path
-from agents.refactor_agent import RefactorAgent, RefactorType
-from agents.analysis_agent import AnalysisAgent
+from acha.agents.refactor_agent import RefactorAgent, RefactorType
+from acha.agents.analysis_agent import AnalysisAgent
 
 
 def write_file(path: Path, content: str):

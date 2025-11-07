@@ -2,8 +2,8 @@
 import ast
 from pathlib import Path
 from typing import Dict, List, Any, Tuple, Set, Optional
-from utils.ast_cache import ASTCache
-from utils.parallel_executor import ParallelExecutor
+from acha.utils.ast_cache import ASTCache
+from acha.utils.parallel_executor import ParallelExecutor
 
 
 # Severity mapping for rules
@@ -388,7 +388,7 @@ class AnalysisAgent:
                 self._add_issue("magic_number", relative_path, ln, end, f"Repeated literal {lit} without named constant")
 
         # --- high_complexity + missing_docstring
-        from utils.policy import PolicyConfig
+        from acha.utils.policy import PolicyConfig
         max_complexity_threshold = PolicyConfig().max_complexity
 
         for node in ast.walk(tree):

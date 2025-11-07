@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from jsonschema import validate, ValidationError
 
-from agents.analysis_agent import AnalysisAgent
+from acha.agents.analysis_agent import AnalysisAgent
 
 
 def test_analysis_agent_detects_issues():
@@ -48,8 +48,13 @@ def dangerous():
         assert isinstance(result['findings'], list)
 
         # Load and validate against schema
-        schema_path = Path("schemas/analysis.schema.json")
-        with open(schema_path) as f:
+        try:
+            from importlib import resources
+        except ImportError:
+            import importlib_resources as resources
+        schema_files = resources.files("acha.schemas")
+        schema_path = schema_files.joinpath("analysis.schema.json")
+        with schema_path.open("r", encoding="utf-8") as f:
             schema = json.load(f)
 
         try:
@@ -131,10 +136,14 @@ def use_subprocess():
 
 def test_schema_validation():
     """Test that the analysis schema is valid"""
-    schema_path = Path("schemas/analysis.schema.json")
-    assert schema_path.exists(), "Schema file should exist"
+    try:
+        from importlib import resources
+    except ImportError:
+        import importlib_resources as resources
+    schema_files = resources.files("acha.schemas")
+    schema_path = schema_files.joinpath("analysis.schema.json")
 
-    with open(schema_path) as f:
+    with schema_path.open("r", encoding="utf-8") as f:
         schema = json.load(f)
 
     # Validate schema structure

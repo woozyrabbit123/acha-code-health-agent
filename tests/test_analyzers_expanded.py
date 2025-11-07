@@ -1,5 +1,5 @@
 from pathlib import Path
-from agents.analysis_agent import AnalysisAgent
+from acha.agents.analysis_agent import AnalysisAgent
 import json, textwrap, os, shutil
 
 def write(p: Path, s: str):

@@ -2,8 +2,8 @@
 import json
 import tempfile
 from pathlib import Path
-from utils.sarif_reporter import SARIFReporter
-from utils.html_reporter import HTMLReporter
+from acha.utils.sarif_reporter import SARIFReporter
+from acha.utils.html_reporter import HTMLReporter
 
 
 def test_sarif_schema_compliance():

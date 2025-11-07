@@ -1,4 +1,4 @@
-from utils.policy import PolicyConfig, PolicyEnforcer
+from acha.utils.policy import PolicyConfig, PolicyEnforcer
 
 def test_policy_violations_risky():
     cfg = PolicyConfig(fail_on_risky=True, max_errors=0)

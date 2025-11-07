@@ -35,7 +35,7 @@ def test_run_command_smoke_test(tmp_path):
 
         # Run the full pipeline
         result = subprocess.run(
-            ["python", "cli.py", "run", "--target", "./sample_project"],
+            ["python", "-m", "acha.cli", "run", "--target", "./sample_project"],
             capture_output=True,
             text=True,
             timeout=60
@@ -111,7 +111,7 @@ def test_run_command_no_refactor_flag(tmp_path):
 
         # Run with --no-refactor
         result = subprocess.run(
-            ["python", "cli.py", "run", "--target", "./sample_project", "--no-refactor"],
+            ["python", "-m", "acha.cli", "run", "--target", "./sample_project", "--no-refactor"],
             capture_output=True,
             text=True,
             timeout=60
@@ -158,7 +158,7 @@ def test_run_command_creates_artifacts_in_expected_locations():
 
         # Run the pipeline
         result = subprocess.run(
-            ["python", "cli.py", "run"],
+            ["python", "-m", "acha.cli", "run"],
             capture_output=True,
             text=True,
             timeout=60

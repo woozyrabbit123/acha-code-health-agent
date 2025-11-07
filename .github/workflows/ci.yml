@@ -97,6 +97,12 @@ jobs:
       - name: Check distribution
         run: twine check dist/*
 
+      - name: Install wheel for smoke test
+        run: pip install dist/*.whl
+
+      - name: CLI smoke test
+        run: acha --help
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -125,11 +131,11 @@ jobs:
 
       - name: Test CLI command
         run: |
-          python cli.py analyze --target ./sample_project --output-format json
+          acha analyze --target ./sample_project --output-format json
 
       - name: Test full pipeline
         run: |
-          python cli.py run --target ./sample_project
+          acha run --target ./sample_project
 
       - name: Verify reports generated
         run: |

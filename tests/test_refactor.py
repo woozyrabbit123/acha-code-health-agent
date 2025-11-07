@@ -6,8 +6,13 @@ from pathlib import Path
 import pytest
 from jsonschema import validate, ValidationError
 
-from agents.analysis_agent import AnalysisAgent
-from agents.refactor_agent import RefactorAgent
+try:
+    from importlib import resources
+except ImportError:
+    import importlib_resources as resources
+
+from acha.agents.analysis_agent import AnalysisAgent
+from acha.agents.refactor_agent import RefactorAgent
 
 
 def test_refactor_agent_inlines_constants():
@@ -64,8 +69,9 @@ def log_key():
         assert 'notes' in patch_summary
 
         # Validate against schema
-        schema_path = Path("schemas/patch_summary.schema.json")
-        with open(schema_path) as f:
+        schema_files = resources.files("acha.schemas")
+        schema_path = schema_files.joinpath("patch_summary.schema.json")
+        with schema_path.open("r", encoding="utf-8") as f:
             schema = json.load(f)
 
         try:
@@ -135,11 +141,14 @@ def hello():
 
 def test_patch_summary_schema_valid():
     """Test that patch_summary.schema.json is valid"""
-    schema_path = Path("schemas/patch_summary.schema.json")
-    assert schema_path.exists(), "Schema file should exist"
-
-    with open(schema_path) as f:
-        schema = json.load(f)
+    schema_files = resources.files("acha.schemas")
+    schema_path = schema_files.joinpath("patch_summary.schema.json")
+    # Test that we can access the schema
+    try:
+        with schema_path.open("r", encoding="utf-8") as f:
+            schema = json.load(f)
+    except FileNotFoundError:
+        assert False, "Schema file should exist"
 
     # Validate schema structure
     assert schema['$schema'] == "http://json-schema.org/draft-07/schema#"
