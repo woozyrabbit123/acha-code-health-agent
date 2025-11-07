@@ -1,11 +1,12 @@
 """Validation Agent - runs tests and validates changes"""
+
 import os
 import re
 import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Any
 
 
 class ValidationAgent:
@@ -15,11 +16,8 @@ class ValidationAgent:
         pass
 
     def run(
-        self,
-        workdir: str,
-        patch_id: str,
-        test_cmd: str = "python -m pytest -q --timeout=30"
-    ) -> Dict[str, Any]:
+        self, workdir: str, patch_id: str, test_cmd: str = "python -m pytest -q --timeout=30"
+    ) -> dict[str, Any]:
         """
         Run tests against the refactored workdir.
 
@@ -39,11 +37,7 @@ class ValidationAgent:
         temp_cfg_path = None
         temp_cfg_fd = None
         try:
-            temp_cfg_fd, temp_cfg_path = tempfile.mkstemp(
-                suffix=".ini",
-                dir=workdir,
-                text=True
-            )
+            temp_cfg_fd, temp_cfg_path = tempfile.mkstemp(suffix=".ini", dir=workdir, text=True)
             # Write minimal pytest config
             os.write(temp_cfg_fd, b"[pytest]\n")
             os.close(temp_cfg_fd)
@@ -54,8 +48,14 @@ class ValidationAgent:
             # -c <config> specifies the config file to use
             cfg_filename = os.path.basename(temp_cfg_path)
             scoped_cmd = [
-                "python", "-m", "pytest", "-q", "--timeout=30",
-                "--confcutdir=.", "-c", cfg_filename
+                "python",
+                "-m",
+                "pytest",
+                "-q",
+                "--timeout=30",
+                "--confcutdir=.",
+                "-c",
+                cfg_filename,
             ]
 
             # Start timer
@@ -68,7 +68,7 @@ class ValidationAgent:
                     cwd=workdir,
                     capture_output=True,
                     text=True,
-                    timeout=60  # Overall timeout for the subprocess
+                    timeout=60,  # Overall timeout for the subprocess
                 )
                 stdout = result.stdout
                 stderr = result.stderr
@@ -81,7 +81,7 @@ class ValidationAgent:
                     "duration_s": duration,
                     "tests_run": 0,
                     "failing_tests": ["Test execution timed out"],
-                    "validate_dir": workdir
+                    "validate_dir": workdir,
                 }
             except Exception as e:
                 duration = time.time() - start_time
@@ -91,7 +91,7 @@ class ValidationAgent:
                     "duration_s": duration,
                     "tests_run": 0,
                     "failing_tests": [f"Test execution failed: {str(e)}"],
-                    "validate_dir": workdir
+                    "validate_dir": workdir,
                 }
         finally:
             # Clean up temporary config file
@@ -114,7 +114,7 @@ class ValidationAgent:
         reports_dir.mkdir(exist_ok=True)
         output_file = reports_dir / "test_output.txt"
 
-        with open(output_file, 'w', encoding='utf-8') as f:
+        with open(output_file, "w", encoding="utf-8") as f:
             f.write("=== STDOUT ===\n")
             f.write(stdout)
             f.write("\n=== STDERR ===\n")
@@ -136,7 +136,7 @@ class ValidationAgent:
             "duration_s": round(duration, 3),
             "tests_run": tests_run,
             "failing_tests": failing_tests,
-            "validate_dir": workdir
+            "validate_dir": workdir,
         }
 
     def _parse_pytest_output(self, stdout: str, stderr: str) -> tuple:
@@ -153,18 +153,18 @@ class ValidationAgent:
 
         # Look for pytest summary line like "5 passed in 0.16s" or "1 failed, 4 passed"
         # Pattern for passed tests
-        passed_match = re.search(r'(\d+)\s+passed', combined)
+        passed_match = re.search(r"(\d+)\s+passed", combined)
         if passed_match:
             tests_run += int(passed_match.group(1))
 
         # Pattern for failed tests
-        failed_match = re.search(r'(\d+)\s+failed', combined)
+        failed_match = re.search(r"(\d+)\s+failed", combined)
         if failed_match:
             failed_count = int(failed_match.group(1))
             tests_run += failed_count
 
         # Extract failing test names - look for FAILED pattern
-        failed_test_pattern = re.compile(r'FAILED\s+([^\s]+)')
+        failed_test_pattern = re.compile(r"FAILED\s+([^\s]+)")
         for match in failed_test_pattern.finditer(combined):
             failing_tests.append(match.group(1))
 

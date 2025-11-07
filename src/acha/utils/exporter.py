@@ -1,10 +1,13 @@
 """Exporter utility for creating proof packs"""
+
 import json
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any
-from jsonschema import validate, ValidationError
+from typing import Any
+
+from jsonschema import validate
+
 try:
     from importlib import resources
 except ImportError:
@@ -12,9 +15,7 @@ except ImportError:
 
 
 def build_proof_pack(
-    dist_dir: str = "dist",
-    reports_dir: str = "reports",
-    patch_path: str = "dist/patch.diff"
+    dist_dir: str = "dist", reports_dir: str = "reports", patch_path: str = "dist/patch.diff"
 ) -> str:
     """
     Build a proof pack ZIP containing all evidence artifacts.
@@ -39,34 +40,22 @@ def build_proof_pack(
     reports_path.mkdir(exist_ok=True)
 
     # Load and validate required JSON files
-    analysis_data = _load_and_validate_json(
-        reports_path / "analysis.json",
-        "analysis.schema.json"
-    )
+    analysis_data = _load_and_validate_json(reports_path / "analysis.json", "analysis.schema.json")
 
     patch_summary_data = _load_and_validate_json(
-        reports_path / "patch_summary.json",
-        "patch_summary.schema.json"
+        reports_path / "patch_summary.json", "patch_summary.schema.json"
     )
 
-    validate_data = _load_and_validate_json(
-        reports_path / "validate.json",
-        "validate.schema.json"
-    )
+    validate_data = _load_and_validate_json(reports_path / "validate.json", "validate.schema.json")
 
     # Generate report.md
     report_md_path = reports_path / "report.md"
-    _generate_report_md(
-        report_md_path,
-        analysis_data,
-        patch_summary_data,
-        validate_data
-    )
+    _generate_report_md(report_md_path, analysis_data, patch_summary_data, validate_data)
 
     # Create release.zip
     zip_path = dist_path / "release.zip"
 
-    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         # Add required JSON files
         zf.write(reports_path / "analysis.json", "reports/analysis.json")
         zf.write(reports_path / "patch_summary.json", "reports/patch_summary.json")
@@ -96,7 +85,7 @@ def build_proof_pack(
     return str(zip_path.resolve())
 
 
-def _load_and_validate_json(json_path: Path, schema_name: str) -> Dict[str, Any]:
+def _load_and_validate_json(json_path: Path, schema_name: str) -> dict[str, Any]:
     """
     Load a JSON file and validate it against a schema.
 
@@ -114,7 +103,7 @@ def _load_and_validate_json(json_path: Path, schema_name: str) -> Dict[str, Any]
     if not json_path.exists():
         raise FileNotFoundError(f"Required file not found: {json_path}")
 
-    with open(json_path, 'r', encoding='utf-8') as f:
+    with open(json_path, encoding="utf-8") as f:
         data = json.load(f)
 
     # Load schema from package resources
@@ -134,9 +123,9 @@ def _load_and_validate_json(json_path: Path, schema_name: str) -> Dict[str, Any]
 
 def _generate_report_md(
     output_path: Path,
-    analysis_data: Dict[str, Any],
-    patch_summary_data: Dict[str, Any],
-    validate_data: Dict[str, Any]
+    analysis_data: dict[str, Any],
+    patch_summary_data: dict[str, Any],
+    validate_data: dict[str, Any],
 ) -> None:
     """
     Generate a human-readable report.md file.
@@ -148,32 +137,31 @@ def _generate_report_md(
         validate_data: Validation results
     """
     # Extract patch info
-    patch_id = patch_summary_data.get('patch_id', 'unknown')
-    files_touched = len(patch_summary_data.get('files_touched', []))
-    lines_added = patch_summary_data.get('lines_added', 0)
-    lines_removed = patch_summary_data.get('lines_removed', 0)
+    patch_id = patch_summary_data.get("patch_id", "unknown")
+    files_touched = len(patch_summary_data.get("files_touched", []))
+    lines_added = patch_summary_data.get("lines_added", 0)
+    lines_removed = patch_summary_data.get("lines_removed", 0)
 
     # Extract analysis info
-    findings = analysis_data.get('findings', [])
+    findings = analysis_data.get("findings", [])
     total_findings = len(findings)
 
     # Group findings by type
     finding_counts = {}
     for finding in findings:
-        ftype = finding.get('finding', 'unknown')
+        ftype = finding.get("finding", "unknown")
         finding_counts[ftype] = finding_counts.get(ftype, 0) + 1
 
     finding_table = "\n".join(
-        f"- {ftype}: {count}"
-        for ftype, count in sorted(finding_counts.items())
+        f"- {ftype}: {count}" for ftype, count in sorted(finding_counts.items())
     )
     if not finding_table:
         finding_table = "- No findings"
 
     # Extract validation info
-    status = validate_data.get('status', 'unknown')
-    tests_run = validate_data.get('tests_run', 0)
-    duration_s = validate_data.get('duration_s', 0)
+    status = validate_data.get("status", "unknown")
+    tests_run = validate_data.get("tests_run", 0)
+    duration_s = validate_data.get("duration_s", 0)
 
     # Generate timestamp
     iso_datetime = datetime.utcnow().isoformat() + "Z"
@@ -200,5 +188,5 @@ Duration: {duration_s}s
 - This pack includes machine-readable JSON and a unified diff for audit.
 """
 
-    with open(output_path, 'w', encoding='utf-8') as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         f.write(report_content)

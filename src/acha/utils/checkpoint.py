@@ -1,4 +1,5 @@
 """Checkpoint utility for backup and restore operations"""
+
 import shutil
 from pathlib import Path
 

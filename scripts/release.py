@@ -79,7 +79,7 @@ def generate_changelog(since_tag: str = None, output_file: str = "CHANGELOG.md")
                 ["git", "describe", "--tags", "--abbrev=0"],
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
             )
             since_tag = result.stdout.strip()
         except subprocess.CalledProcessError:
@@ -169,17 +169,11 @@ def create_git_tag(version: str, message: str = None):
 
     try:
         # Create annotated tag
-        subprocess.run(
-            ["git", "tag", "-a", tag_name, "-m", message],
-            check=True
-        )
+        subprocess.run(["git", "tag", "-a", tag_name, "-m", message], check=True)
         print(f"✓ Created tag {tag_name}")
 
         # Push tag
-        subprocess.run(
-            ["git", "push", "origin", tag_name],
-            check=True
-        )
+        subprocess.run(["git", "push", "origin", tag_name], check=True)
         print(f"✓ Pushed tag {tag_name}")
 
     except subprocess.CalledProcessError as e:
@@ -198,28 +192,19 @@ def main():
         choices=["major", "minor", "patch"],
         default="patch",
         nargs="?",
-        help="Version part to bump (default: patch)"
+        help="Version part to bump (default: patch)",
     )
     bump_parser.add_argument(
-        "--no-commit",
-        action="store_true",
-        help="Don't commit the version bump"
+        "--no-commit", action="store_true", help="Don't commit the version bump"
     )
 
     # changelog command
     changelog_parser = subparsers.add_parser("changelog", help="Generate changelog")
-    changelog_parser.add_argument(
-        "--since",
-        help="Generate changelog since this tag"
-    )
+    changelog_parser.add_argument("--since", help="Generate changelog since this tag")
 
     # tag command
     tag_parser = subparsers.add_parser("tag", help="Create release tag")
-    tag_parser.add_argument(
-        "--message",
-        "-m",
-        help="Tag message"
-    )
+    tag_parser.add_argument("--message", "-m", help="Tag message")
 
     # release command (bump + changelog + tag)
     release_parser = subparsers.add_parser("release", help="Full release (bump + changelog + tag)")
@@ -228,7 +213,7 @@ def main():
         choices=["major", "minor", "patch"],
         default="patch",
         nargs="?",
-        help="Version part to bump (default: patch)"
+        help="Version part to bump (default: patch)",
     )
 
     args = parser.parse_args()
@@ -245,7 +230,7 @@ def main():
         if not args.no_commit:
             subprocess.run(["git", "add", "pyproject.toml"])
             subprocess.run(["git", "commit", "-m", f"chore: bump version to {new_version}"])
-            print(f"✓ Committed version bump")
+            print("✓ Committed version bump")
 
     elif args.command == "changelog":
         generate_changelog(since_tag=args.since)
@@ -275,8 +260,8 @@ def main():
         create_git_tag(new_version, f"Release {new_version}")
 
         print(f"\n✓ Release {new_version} complete!")
-        print(f"\nNext steps:")
-        print(f"  1. Push changes: git push")
+        print("\nNext steps:")
+        print("  1. Push changes: git push")
         print(f"  2. Create GitHub release from tag v{new_version}")
 
     else:

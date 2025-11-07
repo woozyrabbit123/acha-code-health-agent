@@ -1,15 +1,15 @@
 """Policy enforcement for quality gates and inline suppressions."""
+
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 
 @dataclass
 class PolicyConfig:
     fail_on_error: bool = True
     fail_on_risky: bool = True
-    max_warnings: Optional[int] = None
+    max_warnings: int | None = None
     max_errors: int = 0
     max_complexity: int = 15
     max_function_length: int = 50
@@ -23,7 +23,7 @@ class PolicyConfig:
             data = json.load(f)
         return cls(**data)
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             "fail_on_error": self.fail_on_error,
             "fail_on_risky": self.fail_on_risky,
@@ -37,6 +37,7 @@ class PolicyConfig:
 
 class PolicyEnforcer:
     """Simple severity gate with risky-construct hard fail."""
+
     def __init__(self, config: PolicyConfig):
         self.config = config
 
@@ -55,8 +56,8 @@ class PolicyEnforcer:
         else:
             return "info"
 
-    def check_violations(self, analysis_results: Dict) -> Tuple[bool, List[str]]:
-        violations: List[str] = []
+    def check_violations(self, analysis_results: dict) -> tuple[bool, list[str]]:
+        violations: list[str] = []
         errors = 0
         warnings = 0
         risky = 0
@@ -81,10 +82,10 @@ class PolicyEnforcer:
 
         return (len(violations) == 0, violations)
 
-    def filter_suppressed(self, issues: List[Dict], source_lines: List[str]) -> List[Dict]:
+    def filter_suppressed(self, issues: list[dict], source_lines: list[str]) -> list[dict]:
         if not self.config.suppression_enabled:
             return issues
-        filtered: List[Dict] = []
+        filtered: list[dict] = []
         for issue in issues:
             ln = issue.get("line", 0)
             rule = issue.get("rule", "")

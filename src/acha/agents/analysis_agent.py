@@ -1,10 +1,11 @@
 """Analysis Agent - detects code quality issues"""
+
 import ast
 from pathlib import Path
-from typing import Dict, List, Any, Tuple, Set, Optional
+from typing import Any
+
 from acha.utils.ast_cache import ASTCache
 from acha.utils.parallel_executor import ParallelExecutor
-
 
 # Severity mapping for rules
 RULE_SEVERITY = {
@@ -43,7 +44,20 @@ def _is_broad_exception(handler: ast.ExceptHandler) -> bool:
 def _compute_cyclomatic_complexity(fn) -> int:
     count = 1
     for node in ast.walk(fn):
-        if isinstance(node, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.With, ast.AsyncWith, ast.Try, ast.IfExp, ast.Match)):
+        if isinstance(
+            node,
+            (
+                ast.If,
+                ast.For,
+                ast.AsyncFor,
+                ast.While,
+                ast.With,
+                ast.AsyncWith,
+                ast.Try,
+                ast.IfExp,
+                ast.Match,
+            ),
+        ):
             count += 1
         if isinstance(node, ast.BoolOp):
             # add for each boolean operation beyond the first
@@ -55,8 +69,8 @@ def _compute_cyclomatic_complexity(fn) -> int:
     return count
 
 
-def _file_wide_suppressions(source_lines: List[str]) -> Set[str]:
-    kinds: Set[str] = set()
+def _file_wide_suppressions(source_lines: list[str]) -> set[str]:
+    kinds: set[str] = set()
     for line in source_lines:
         if "# acha: file-disable-all" in line:
             kinds.add("*")
@@ -71,7 +85,7 @@ def _file_wide_suppressions(source_lines: List[str]) -> Set[str]:
     return kinds
 
 
-def _is_suppressed(rule: str, lineno: int, source_lines: List[str], file_sups: Set[str]) -> bool:
+def _is_suppressed(rule: str, lineno: int, source_lines: list[str], file_sups: set[str]) -> bool:
     if "*" in file_sups or rule in file_sups:
         return True
     if 1 <= lineno <= len(source_lines):
@@ -84,10 +98,10 @@ def _is_suppressed(rule: str, lineno: int, source_lines: List[str], file_sups: S
     return False
 
 
-def _collect_import_usage(tree: ast.AST) -> Tuple[Dict[str, List[int]], Set[str]]:
+def _collect_import_usage(tree: ast.AST) -> tuple[dict[str, list[int]], set[str]]:
     # map imported names -> line numbers declared; and names referenced
-    imported: Dict[str, List[int]] = {}
-    referenced: Set[str] = set()
+    imported: dict[str, list[int]] = {}
+    referenced: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -102,8 +116,8 @@ def _collect_import_usage(tree: ast.AST) -> Tuple[Dict[str, List[int]], Set[str]
     return imported, referenced
 
 
-def _subprocess_shell_calls(tree: ast.AST) -> List[Tuple[int, int]]:
-    hits: List[Tuple[int, int]] = []
+def _subprocess_shell_calls(tree: ast.AST) -> list[tuple[int, int]]:
+    hits: list[tuple[int, int]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             # func is subprocess.<x>
@@ -114,29 +128,39 @@ def _subprocess_shell_calls(tree: ast.AST) -> List[Tuple[int, int]]:
             if not is_subprocess:
                 continue
             for kw in node.keywords or []:
-                if kw.arg == "shell" and isinstance(kw.value, ast.Constant) and kw.value.value is True:
+                if (
+                    kw.arg == "shell"
+                    and isinstance(kw.value, ast.Constant)
+                    and kw.value.value is True
+                ):
                     hits.append((node.lineno, getattr(node, "end_lineno", node.lineno)))
     return hits
 
 
-def _find_broad_excepts(tree: ast.AST) -> List[Tuple[int, int]]:
-    out: List[Tuple[int, int]] = []
+def _find_broad_excepts(tree: ast.AST) -> list[tuple[int, int]]:
+    out: list[tuple[int, int]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ExceptHandler) and _is_broad_exception(node):
             out.append((node.lineno, getattr(node, "end_lineno", node.lineno)))
     return out
 
 
-def _find_magic_numbers(tree: ast.AST, source_lines: List[str]) -> List[Tuple[int, int, str]]:
-    hits: List[Tuple[int, int, str]] = []
+def _find_magic_numbers(tree: ast.AST, source_lines: list[str]) -> list[tuple[int, int, str]]:
+    hits: list[tuple[int, int, str]] = []
+
     def is_exempt(n: ast.AST) -> bool:
         # 0/1/-1 common sentinels
         if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)):
             if n.value in (0, 1, -1):
                 return True
         return False
+
     for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not is_exempt(node):
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, (int, float))
+            and not is_exempt(node)
+        ):
             # heuristic: ignore if in assignment to ALL_CAPS name or default arg
             parent = getattr(node, "parent", None)
             if isinstance(parent, ast.keyword):  # default kw
@@ -144,7 +168,7 @@ def _find_magic_numbers(tree: ast.AST, source_lines: List[str]) -> List[Tuple[in
             ln = node.lineno
             hits.append((ln, getattr(node, "end_lineno", ln), repr(node.value)))
     # post-filter: require repeats (same literal 2+ times in file)
-    counts: Dict[str, int] = {}
+    counts: dict[str, int] = {}
     for _, _, lit in hits:
         counts[lit] = counts.get(lit, 0) + 1
     return [(ln, end, lit) for (ln, end, lit) in hits if counts.get(lit, 0) >= 2]
@@ -156,7 +180,7 @@ def _attach_parents(tree: ast.AST) -> None:
             child.parent = node  # type: ignore[attr-defined]
 
 
-def _read_lines(p: Path) -> List[str]:
+def _read_lines(p: Path) -> list[str]:
     try:
         return p.read_text(encoding="utf-8").splitlines()
     except Exception:
@@ -166,8 +190,13 @@ def _read_lines(p: Path) -> List[str]:
 class AnalysisAgent:
     """Agent for analyzing code quality"""
 
-    def __init__(self, dup_threshold: int = 3, cache: Optional[ASTCache] = None,
-                 parallel: bool = False, max_workers: int = 4):
+    def __init__(
+        self,
+        dup_threshold: int = 3,
+        cache: ASTCache | None = None,
+        parallel: bool = False,
+        max_workers: int = 4,
+    ):
         """
         Initialize the analysis agent.
 
@@ -194,15 +223,10 @@ class AnalysisAgent:
         if isinstance(severity, (int, float)):
             return float(severity)
 
-        severity_map = {
-            "info": 0.1,
-            "warning": 0.4,
-            "error": 0.7,
-            "critical": 0.9
-        }
+        severity_map = {"info": 0.1, "warning": 0.4, "error": 0.7, "critical": 0.9}
         return severity_map.get(str(severity).lower(), 0.5)
 
-    def _add_finding(self, finding: Dict[str, Any]) -> None:
+    def _add_finding(self, finding: dict[str, Any]) -> None:
         """Add a finding with automatic severity assignment"""
         rule = finding.get("rule", finding.get("finding", ""))
         severity_str = RULE_SEVERITY.get(rule, "info")
@@ -215,23 +239,33 @@ class AnalysisAgent:
 
         self.findings.append(finding)
 
-    def _add_issue(self, rule: str, file_path: str, start: int, end: int, rationale: str, test_hints: List[str] = None):
+    def _add_issue(
+        self,
+        rule: str,
+        file_path: str,
+        start: int,
+        end: int,
+        rationale: str,
+        test_hints: list[str] = None,
+    ):
         """Add an issue with standard fields"""
         severity_str = RULE_SEVERITY.get(rule, "info")
-        self._add_finding({
-            "id": self._generate_finding_id(),
-            "rule": rule,
-            "finding": rule,
-            "severity": severity_str,  # Will be converted to numeric by _add_finding
-            "file": file_path,
-            "start_line": start,
-            "end_line": end,
-            "rationale": rationale,
-            "test_hints": test_hints or [],
-            "fix_type": "manual"
-        })
+        self._add_finding(
+            {
+                "id": self._generate_finding_id(),
+                "rule": rule,
+                "finding": rule,
+                "severity": severity_str,  # Will be converted to numeric by _add_finding
+                "file": file_path,
+                "start_line": start,
+                "end_line": end,
+                "rationale": rationale,
+                "test_hints": test_hints or [],
+                "fix_type": "manual",
+            }
+        )
 
-    def run(self, target_dir: str) -> Dict[str, List[Dict[str, Any]]]:
+    def run(self, target_dir: str) -> dict[str, list[dict[str, Any]]]:
         """
         Analyze code at the given directory.
 
@@ -261,7 +295,7 @@ class AnalysisAgent:
 
         return {"findings": self.findings}
 
-    def analyze_batch(self, target_dirs: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+    def analyze_batch(self, target_dirs: list[str]) -> dict[str, list[dict[str, Any]]]:
         """
         Analyze multiple directories in batch.
 
@@ -295,11 +329,11 @@ class AnalysisAgent:
 
         return results
 
-    def _analyze_parallel(self, python_files: List[Path], base_path: Path):
+    def _analyze_parallel(self, python_files: list[Path], base_path: Path):
         """Analyze files in parallel"""
         executor = ParallelExecutor(max_workers=self.max_workers, verbose=False)
 
-        def analyze_single(py_file: Path) -> List[Dict]:
+        def analyze_single(py_file: Path) -> list[dict]:
             # Create a temporary findings list for this file
             original_findings = self.findings
             original_counter = self.finding_counter
@@ -326,10 +360,10 @@ class AnalysisAgent:
                 self.findings.extend(file_findings)
                 # Update counter based on findings added
                 for finding in file_findings:
-                    if 'id' in finding:
+                    if "id" in finding:
                         # Extract counter from id like "ANL-001"
                         try:
-                            counter = int(finding['id'].split('-')[1])
+                            counter = int(finding["id"].split("-")[1])
                             self.finding_counter = max(self.finding_counter, counter)
                         except Exception:
                             pass
@@ -337,10 +371,10 @@ class AnalysisAgent:
     def _analyze_file(self, file_path: Path, base_path: Path):
         """Analyze a single Python file"""
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, encoding="utf-8") as f:
                 content = f.read()
-                lines = content.split('\n')
-        except Exception as e:
+                lines = content.split("\n")
+        except Exception:
             # Skip files that can't be read
             return
 
@@ -380,36 +414,75 @@ class AnalysisAgent:
             if name not in referenced:
                 for ln in import_lines:
                     if not _is_suppressed("unused_import", ln, lines, file_sups):
-                        self._add_issue("unused_import", relative_path, ln, ln, f"Imported '{name}' is never used")
+                        self._add_issue(
+                            "unused_import",
+                            relative_path,
+                            ln,
+                            ln,
+                            f"Imported '{name}' is never used",
+                        )
 
         # --- magic_number
         for ln, end, lit in _find_magic_numbers(tree, lines):
             if not _is_suppressed("magic_number", ln, lines, file_sups):
-                self._add_issue("magic_number", relative_path, ln, end, f"Repeated literal {lit} without named constant")
+                self._add_issue(
+                    "magic_number",
+                    relative_path,
+                    ln,
+                    end,
+                    f"Repeated literal {lit} without named constant",
+                )
 
         # --- high_complexity + missing_docstring
         from acha.utils.policy import PolicyConfig
+
         max_complexity_threshold = PolicyConfig().max_complexity
 
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 ln = node.lineno
-                if not _has_docstring(node) and not _is_suppressed("missing_docstring", ln, lines, file_sups):
-                    self._add_issue("missing_docstring", relative_path, ln, ln, f"Function '{node.name}' missing docstring")
+                if not _has_docstring(node) and not _is_suppressed(
+                    "missing_docstring", ln, lines, file_sups
+                ):
+                    self._add_issue(
+                        "missing_docstring",
+                        relative_path,
+                        ln,
+                        ln,
+                        f"Function '{node.name}' missing docstring",
+                    )
                 cplx = _compute_cyclomatic_complexity(node)
                 if cplx > max_complexity_threshold:
                     if not _is_suppressed("high_complexity", ln, lines, file_sups):
-                        self._add_issue("high_complexity", relative_path, ln, ln, f"Function '{node.name}' complexity {cplx} exceeds threshold {max_complexity_threshold}")
+                        self._add_issue(
+                            "high_complexity",
+                            relative_path,
+                            ln,
+                            ln,
+                            f"Function '{node.name}' complexity {cplx} exceeds threshold {max_complexity_threshold}",
+                        )
 
         # --- broad_exception
         for ln, end in _find_broad_excepts(tree):
             if not _is_suppressed("broad_exception", ln, lines, file_sups):
-                self._add_issue("broad_exception", relative_path, ln, end, "Catching broad Exception or bare except")
+                self._add_issue(
+                    "broad_exception",
+                    relative_path,
+                    ln,
+                    end,
+                    "Catching broad Exception or bare except",
+                )
 
         # --- subprocess shell=True
         for ln, end in _subprocess_shell_calls(tree):
             if not _is_suppressed("broad_subprocess_shell", ln, lines, file_sups):
-                self._add_issue("broad_subprocess_shell", relative_path, ln, end, "subprocess called with shell=True")
+                self._add_issue(
+                    "broad_subprocess_shell",
+                    relative_path,
+                    ln,
+                    end,
+                    "subprocess called with shell=True",
+                )
 
         # EXISTING RULES (keep unchanged)
 
@@ -422,7 +495,9 @@ class AnalysisAgent:
         # Detect long functions
         self._detect_long_functions(tree, relative_path, lines, file_sups)
 
-    def _detect_duplicated_constants(self, tree: ast.AST, file_path: str, lines: List[str], file_sups: Set[str]):
+    def _detect_duplicated_constants(
+        self, tree: ast.AST, file_path: str, lines: list[str], file_sups: set[str]
+    ):
         """Detect duplicated immutable constants at module level"""
         # Find module-level constant assignments
         constants = {}
@@ -452,9 +527,9 @@ class AnalysisAgent:
                             for target in item.targets:
                                 if isinstance(target, ast.Name):
                                     constants[target.id] = {
-                                        'value': value,
-                                        'line': item.lineno,
-                                        'name': target.id
+                                        "value": value,
+                                        "line": item.lineno,
+                                        "name": target.id,
                                     }
 
         # Count references to these constants
@@ -464,33 +539,37 @@ class AnalysisAgent:
             for node in ast.walk(tree):
                 if isinstance(node, ast.Name) and node.id == const_name:
                     # Don't count the assignment itself
-                    if node.lineno != const_info['line']:
+                    if node.lineno != const_info["line"]:
                         ref_count += 1
 
             # Flag if referenced more than threshold
             if ref_count > self.dup_threshold:
-                ln = const_info['line']
+                ln = const_info["line"]
                 if not _is_suppressed("dup_immutable_const", ln, lines, file_sups):
-                    self._add_finding({
-                        'id': self._generate_finding_id(),
-                        'file': file_path,
-                        'start_line': const_info['line'],
-                        'end_line': const_info['line'],
-                        'finding': 'dup_immutable_const',
-                        'rule': 'dup_immutable_const',
-                        'severity': 0.4,
-                        'fix_type': 'inline_const',
-                        'rationale': f"Constant '{const_name}' with value {repr(const_info['value'])} is referenced {ref_count} times. Consider inlining or using a more descriptive pattern.",
-                        'test_hints': [
-                            f"Verify all {ref_count} usages of '{const_name}' still work after refactoring",
-                            "Ensure the constant value is correctly inlined in all locations"
-                        ]
-                    })
+                    self._add_finding(
+                        {
+                            "id": self._generate_finding_id(),
+                            "file": file_path,
+                            "start_line": const_info["line"],
+                            "end_line": const_info["line"],
+                            "finding": "dup_immutable_const",
+                            "rule": "dup_immutable_const",
+                            "severity": 0.4,
+                            "fix_type": "inline_const",
+                            "rationale": f"Constant '{const_name}' with value {repr(const_info['value'])} is referenced {ref_count} times. Consider inlining or using a more descriptive pattern.",
+                            "test_hints": [
+                                f"Verify all {ref_count} usages of '{const_name}' still work after refactoring",
+                                "Ensure the constant value is correctly inlined in all locations",
+                            ],
+                        }
+                    )
 
-    def _detect_risky_constructs(self, tree: ast.AST, file_path: str, lines: List[str], file_sups: Set[str]):
+    def _detect_risky_constructs(
+        self, tree: ast.AST, file_path: str, lines: list[str], file_sups: set[str]
+    ):
         """Detect risky constructs like eval, exec, __import__, subprocess"""
-        risky_names = {'eval', 'exec', '__import__'}
-        risky_attrs = {'subprocess'}
+        risky_names = {"eval", "exec", "__import__"}
+        risky_attrs = {"subprocess"}
 
         for node in ast.walk(tree):
             risky_call = None
@@ -507,47 +586,53 @@ class AnalysisAgent:
             # Check for imports of subprocess
             elif isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.name == 'subprocess':
+                    if alias.name == "subprocess":
                         ln = node.lineno
                         if not _is_suppressed("risky_construct", ln, lines, file_sups):
-                            self._add_finding({
-                                'id': self._generate_finding_id(),
-                                'file': file_path,
-                                'start_line': node.lineno,
-                                'end_line': node.lineno,
-                                'finding': 'risky_construct',
-                                'rule': 'risky_construct',
-                                'severity': 0.8,
-                                'fix_type': 'remove_or_wrap',
-                                'rationale': f"Import of 'subprocess' module detected. This can be dangerous if used with untrusted input.",
-                                'test_hints': [
-                                    "Review all subprocess calls for security issues",
-                                    "Ensure no user input is passed to subprocess without validation",
-                                    "Consider safer alternatives if possible"
-                                ]
-                            })
+                            self._add_finding(
+                                {
+                                    "id": self._generate_finding_id(),
+                                    "file": file_path,
+                                    "start_line": node.lineno,
+                                    "end_line": node.lineno,
+                                    "finding": "risky_construct",
+                                    "rule": "risky_construct",
+                                    "severity": 0.8,
+                                    "fix_type": "remove_or_wrap",
+                                    "rationale": "Import of 'subprocess' module detected. This can be dangerous if used with untrusted input.",
+                                    "test_hints": [
+                                        "Review all subprocess calls for security issues",
+                                        "Ensure no user input is passed to subprocess without validation",
+                                        "Consider safer alternatives if possible",
+                                    ],
+                                }
+                            )
 
             if risky_call:
                 ln = node.lineno
                 if not _is_suppressed("risky_construct", ln, lines, file_sups):
-                    self._add_finding({
-                        'id': self._generate_finding_id(),
-                        'file': file_path,
-                        'start_line': node.lineno,
-                        'end_line': node.lineno,
-                        'finding': 'risky_construct',
-                        'rule': 'risky_construct',
-                        'severity': 0.9,
-                        'fix_type': 'remove_or_wrap',
-                        'rationale': f"Use of '{risky_call}' detected. This is a dangerous construct that can execute arbitrary code.",
-                        'test_hints': [
-                            f"Remove '{risky_call}' and use safer alternatives",
-                            "If necessary, wrap with strict input validation",
-                            "Consider using ast.literal_eval for safe evaluation"
-                        ]
-                    })
+                    self._add_finding(
+                        {
+                            "id": self._generate_finding_id(),
+                            "file": file_path,
+                            "start_line": node.lineno,
+                            "end_line": node.lineno,
+                            "finding": "risky_construct",
+                            "rule": "risky_construct",
+                            "severity": 0.9,
+                            "fix_type": "remove_or_wrap",
+                            "rationale": f"Use of '{risky_call}' detected. This is a dangerous construct that can execute arbitrary code.",
+                            "test_hints": [
+                                f"Remove '{risky_call}' and use safer alternatives",
+                                "If necessary, wrap with strict input validation",
+                                "Consider using ast.literal_eval for safe evaluation",
+                            ],
+                        }
+                    )
 
-    def _detect_long_functions(self, tree: ast.AST, file_path: str, lines: List[str], file_sups: Set[str]):
+    def _detect_long_functions(
+        self, tree: ast.AST, file_path: str, lines: list[str], file_sups: set[str]
+    ):
         """Detect functions that are too long (>60 lines)"""
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -557,19 +642,21 @@ class AnalysisAgent:
 
                 if length > 60:
                     if not _is_suppressed("long_function", start_line, lines, file_sups):
-                        self._add_finding({
-                            'id': self._generate_finding_id(),
-                            'file': file_path,
-                            'start_line': start_line,
-                            'end_line': end_line,
-                            'finding': 'long_function',
-                            'rule': 'long_function',
-                            'severity': 0.5,
-                            'fix_type': 'extract_helper',
-                            'rationale': f"Function '{node.name}' is {length} lines long. Consider breaking it into smaller helper functions.",
-                            'test_hints': [
-                                f"Extract logical sections of '{node.name}' into separate helper functions",
-                                "Ensure all tests pass after refactoring",
-                                "Verify the function's interface remains unchanged"
-                            ]
-                        })
+                        self._add_finding(
+                            {
+                                "id": self._generate_finding_id(),
+                                "file": file_path,
+                                "start_line": start_line,
+                                "end_line": end_line,
+                                "finding": "long_function",
+                                "rule": "long_function",
+                                "severity": 0.5,
+                                "fix_type": "extract_helper",
+                                "rationale": f"Function '{node.name}' is {length} lines long. Consider breaking it into smaller helper functions.",
+                                "test_hints": [
+                                    f"Extract logical sections of '{node.name}' into separate helper functions",
+                                    "Ensure all tests pass after refactoring",
+                                    "Verify the function's interface remains unchanged",
+                                ],
+                            }
+                        )

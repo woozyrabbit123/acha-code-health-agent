@@ -1,10 +1,9 @@
 """AST caching for improved performance"""
+
 import ast
 import hashlib
 import pickle
 from pathlib import Path
-from typing import Optional, Dict, Tuple
-import os
 
 
 class ASTCache:
@@ -23,7 +22,7 @@ class ASTCache:
         self.enabled = True
 
         # In-memory cache: file_path -> (tree, mtime, access_count)
-        self._memory_cache: Dict[str, Tuple[ast.AST, float, int]] = {}
+        self._memory_cache: dict[str, tuple[ast.AST, float, int]] = {}
 
         # Initialize cache directory
         if self.enabled:
@@ -47,7 +46,7 @@ class ASTCache:
         except Exception:
             return 0.0
 
-    def get_ast(self, file_path: Path) -> Optional[ast.AST]:
+    def get_ast(self, file_path: Path) -> ast.AST | None:
         """
         Return cached AST if file unchanged.
 
@@ -80,9 +79,9 @@ class ASTCache:
             return None
 
         try:
-            with open(cache_file, 'rb') as f:
+            with open(cache_file, "rb") as f:
                 cached_data = pickle.load(f)
-                cached_mtime = cached_data.get('mtime', 0.0)
+                cached_mtime = cached_data.get("mtime", 0.0)
 
                 # Check if file was modified
                 if current_mtime != cached_mtime:
@@ -90,7 +89,7 @@ class ASTCache:
                     cache_file.unlink()
                     return None
 
-                tree = cached_data.get('tree')
+                tree = cached_data.get("tree")
 
                 # Store in memory cache
                 self._memory_cache[file_str] = (tree, cached_mtime, 1)
@@ -124,12 +123,8 @@ class ASTCache:
         # Store on disk
         cache_file = self._get_cache_file(file_path)
         try:
-            cached_data = {
-                'tree': tree,
-                'mtime': mtime,
-                'file_path': str(file_path)
-            }
-            with open(cache_file, 'wb') as f:
+            cached_data = {"tree": tree, "mtime": mtime, "file_path": str(file_path)}
+            with open(cache_file, "wb") as f:
                 pickle.dump(cached_data, f)
         except Exception:
             # Failed to write cache, continue without caching
@@ -141,10 +136,7 @@ class ASTCache:
             return
 
         # Sort by access count (LRU)
-        sorted_entries = sorted(
-            self._memory_cache.items(),
-            key=lambda x: x[1][2]  # access_count
-        )
+        sorted_entries = sorted(self._memory_cache.items(), key=lambda x: x[1][2])  # access_count
 
         # Remove 10% of least used entries
         to_remove = max(1, len(sorted_entries) // 10)
@@ -185,11 +177,11 @@ class ASTCache:
             except Exception:
                 pass
 
-    def get_stats(self) -> Dict[str, int]:
+    def get_stats(self) -> dict[str, int]:
         """Get cache statistics"""
         disk_count = len(list(self.cache_dir.glob("*.ast"))) if self.cache_dir.exists() else 0
         return {
-            'memory_entries': len(self._memory_cache),
-            'disk_entries': disk_count,
-            'max_size': self.max_size
+            "memory_entries": len(self._memory_cache),
+            "disk_entries": disk_count,
+            "max_size": self.max_size,
         }
