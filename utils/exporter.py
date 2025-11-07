@@ -74,6 +74,16 @@ def build_proof_pack(
         if test_output_path.exists():
             zf.write(test_output_path, "reports/test_output.txt")
 
+        # Add SARIF report if exists
+        sarif_path = reports_path / "analysis.sarif"
+        if sarif_path.exists():
+            zf.write(sarif_path, "reports/analysis.sarif")
+
+        # Add HTML report if exists
+        html_path = reports_path / "report.html"
+        if html_path.exists():
+            zf.write(html_path, "reports/report.html")
+
         patch_file_path = Path(patch_path)
         if patch_file_path.exists():
             zf.write(patch_file_path, "dist/patch.diff")

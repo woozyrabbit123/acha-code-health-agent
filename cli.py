@@ -15,6 +15,8 @@ from utils.exporter import build_proof_pack
 from utils.logger import init_session_logger, log_event, close_session_logger
 from utils.policy import PolicyConfig, PolicyEnforcer
 from utils.ast_cache import ASTCache
+from utils.sarif_reporter import SARIFReporter
+from utils.html_reporter import HTMLReporter
 import os
 
 
@@ -58,16 +60,45 @@ def analyze(args):
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
 
-    # Write results to reports/analysis.json
-    output_path = reports_dir / "analysis.json"
-    with open(output_path, 'w', encoding='utf-8') as f:
+    # Get output format
+    output_format = getattr(args, 'output_format', 'json')
+
+    # Always write JSON (required for other tools)
+    json_path = reports_dir / "analysis.json"
+    with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(result, f, indent=2)
+
+    output_files = [str(json_path)]
+
+    # Generate SARIF output if requested
+    if output_format in ['sarif', 'all']:
+        sarif_reporter = SARIFReporter(tool_name="ACHA", version="0.3.0")
+        sarif_path = reports_dir / "analysis.sarif"
+        sarif_reporter.generate_and_write(
+            findings=result.get('findings', []),
+            base_path=Path(targets[0]).resolve(),
+            output_path=sarif_path
+        )
+        output_files.append(str(sarif_path))
+
+    # Generate HTML output if requested
+    if output_format in ['html', 'all']:
+        html_reporter = HTMLReporter()
+        html_path = reports_dir / "report.html"
+        html_reporter.generate_and_write(
+            output_path=html_path,
+            analysis=result,
+            target_path=targets[0]
+        )
+        output_files.append(str(html_path))
 
     # Print summary
     findings_count = len(result.get('findings', []))
     print(f"\nAnalysis complete!")
     print(f"Total findings: {findings_count}")
-    print(f"Report written to: {output_path}")
+    print(f"Reports written to:")
+    for output_file in output_files:
+        print(f"  - {output_file}")
 
     # Count findings by type
     finding_types = {}
@@ -282,6 +313,10 @@ def run_pipeline_command(args, policy=None):
 
     analyze_args = Args()
     analyze_args.target = target_dir
+    analyze_args.output_format = 'all'  # Generate JSON, SARIF, and HTML
+    analyze_args.parallel = True
+    analyze_args.cache = True
+    analyze_args.max_workers = 4
 
     result = analyze(analyze_args)
     if result != 0:
@@ -460,6 +495,8 @@ def main():
     # analyze subcommand
     parser_analyze = subparsers.add_parser('analyze', help='Analyze code quality')
     parser_analyze.add_argument('--target', required=True, help='Target directory to analyze')
+    parser_analyze.add_argument('--output-format', choices=['json', 'sarif', 'html', 'all'], default='json',
+                                help='Output format (default: json)')
     parser_analyze.add_argument('--parallel', action='store_true', default=True, help='Enable parallel analysis (default: enabled)')
     parser_analyze.add_argument('--no-parallel', action='store_false', dest='parallel', help='Disable parallel analysis')
     parser_analyze.add_argument('--max-workers', type=int, default=4, help='Number of worker threads (default: 4)')
