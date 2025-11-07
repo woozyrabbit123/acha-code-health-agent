@@ -14,18 +14,42 @@ from utils.checkpoint import checkpoint, restore
 from utils.exporter import build_proof_pack
 from utils.logger import init_session_logger, log_event, close_session_logger
 from utils.policy import PolicyConfig, PolicyEnforcer
+from utils.ast_cache import ASTCache
+import os
 
 
 def analyze(args):
     """Run code analysis"""
-    target_dir = args.target
+    # Support multiple targets for batch mode
+    targets = getattr(args, 'targets', None) or [args.target]
 
-    print(f"Analyzing code in: {target_dir}")
+    # Setup cache if enabled
+    cache = None
+    use_cache = getattr(args, 'cache', True)
+    if use_cache:
+        cache = ASTCache()
+
+    # Setup parallel execution
+    parallel = getattr(args, 'parallel', False)
+    max_workers = getattr(args, 'max_workers', 4)
+
+    # Auto-detect parallel if not specified
+    if parallel is None:
+        # Enable parallel if more than 10 files expected
+        parallel = True  # Default to enabled
+
+    if len(targets) == 1:
+        print(f"Analyzing code in: {targets[0]}")
+    else:
+        print(f"Analyzing code in {len(targets)} directories (batch mode)")
 
     # Run analysis
-    agent = AnalysisAgent()
+    agent = AnalysisAgent(cache=cache, parallel=parallel, max_workers=max_workers)
     try:
-        result = agent.run(target_dir)
+        if len(targets) > 1:
+            result = agent.analyze_batch(targets)
+        else:
+            result = agent.run(targets[0])
     except Exception as e:
         print(f"Error during analysis: {e}")
         return 1
@@ -436,6 +460,11 @@ def main():
     # analyze subcommand
     parser_analyze = subparsers.add_parser('analyze', help='Analyze code quality')
     parser_analyze.add_argument('--target', required=True, help='Target directory to analyze')
+    parser_analyze.add_argument('--parallel', action='store_true', default=True, help='Enable parallel analysis (default: enabled)')
+    parser_analyze.add_argument('--no-parallel', action='store_false', dest='parallel', help='Disable parallel analysis')
+    parser_analyze.add_argument('--max-workers', type=int, default=4, help='Number of worker threads (default: 4)')
+    parser_analyze.add_argument('--cache', action='store_true', default=True, help='Enable AST cache (default: enabled)')
+    parser_analyze.add_argument('--no-cache', action='store_false', dest='cache', help='Disable AST cache')
     parser_analyze.set_defaults(func=analyze)
 
     # refactor subcommand
