@@ -12,6 +12,8 @@ from agents.refactor_agent import RefactorAgent
 from agents.validation_agent import ValidationAgent
 from utils.checkpoint import checkpoint, restore
 from utils.exporter import build_proof_pack
+from utils.logger import init_session_logger, log_event, close_session_logger
+from utils.policy import PolicyConfig, PolicyEnforcer
 
 
 def analyze(args):
@@ -194,12 +196,14 @@ def export(args):
         return 1
 
 
-def run(args):
+def run_pipeline_command(args, policy=None):
     """Run full pipeline: analyze → refactor → validate → export"""
     target_dir = args.target
     no_refactor = args.no_refactor
     fail_on_risky = args.fail_on_risky
     timeout = args.timeout
+
+    log_event("pipeline_start", {"target": str(target_dir)})
 
     # Ensure reports directory exists
     reports_dir = Path("reports")
@@ -253,6 +257,24 @@ def run(args):
     findings_count = len(analysis_data.get('findings', []))
     log(f"✓ Analysis complete: {findings_count} findings")
     log("")
+
+    # Policy check if policy provided
+    if policy:
+        # Convert findings to issues format for policy enforcer
+        issues_for_policy = []
+        for finding in analysis_data.get('findings', []):
+            issues_for_policy.append({
+                "rule": finding.get("finding", ""),
+                "severity": finding.get("severity", "info")
+            })
+        policy_results = {"issues": issues_for_policy}
+
+        enforcer = PolicyEnforcer(policy)
+        passed, reasons = enforcer.check_violations(policy_results)
+        log_event("policy_check", {"passed": passed, "violations": reasons})
+        if not passed:
+            log("Policy violations detected: " + "; ".join(reasons))
+            return 1
 
     # Check for risky constructs if --fail-on-risky
     if fail_on_risky:
@@ -382,6 +404,14 @@ def main():
         description='ACHA - AI Code Health Agent'
     )
 
+    # Global flags
+    parser.add_argument("--config", type=Path, help="Path to configuration file (JSON)")
+    parser.add_argument("--policy", type=Path, help="Path to policy file (JSON quality gates)")
+    parser.add_argument("--format", choices=["text", "json", "jsonl"], default="text",
+                        help="Output format for stdout (default: text)")
+    parser.add_argument("--session-log", type=Path, default=Path("reports/session.jsonl"),
+                        help="Path for JSONL session log")
+
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
 
     # analyze subcommand
@@ -410,15 +440,36 @@ def main():
     parser_run.add_argument('--no-refactor', action='store_true', help='Skip refactoring step')
     parser_run.add_argument('--fail-on-risky', action='store_true', help='Fail if risky constructs found')
     parser_run.add_argument('--timeout', type=int, default=30, help='Test timeout in seconds (default: 30)')
-    parser_run.set_defaults(func=run)
+    parser_run.set_defaults(func=run_pipeline_command)
 
     args = parser.parse_args()
 
-    if not args.command:
-        parser.print_help()
-        return 1
+    # Initialize session logger
+    init_session_logger(args.session_log)
+    log_event("cli_start", {"argv": sys.argv})
 
-    return args.func(args)
+    try:
+        # Load policy if provided
+        policy_cfg = PolicyConfig.from_file(args.policy) if getattr(args, "policy", None) else None
+        if policy_cfg:
+            log_event("policy_loaded", policy_cfg.to_dict())
+
+        if not args.command:
+            parser.print_help()
+            return 1
+
+        # Dispatch to appropriate command
+        if args.command == "run":
+            result = run_pipeline_command(args, policy_cfg)
+            # result is 0 on success, False or 1 on failure
+            if result == 0:
+                return 0
+            else:
+                return 1
+        else:
+            return args.func(args)
+    finally:
+        close_session_logger()
 
 
 if __name__ == '__main__':

@@ -216,3 +216,7 @@ dist/release.zip
 # Test artifacts
 /analysis.json
 /syntax_test.py
+
+# Session logs
+reports/session.jsonl
+reports/*.jsonl

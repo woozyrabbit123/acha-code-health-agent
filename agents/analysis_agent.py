@@ -5,6 +5,17 @@ from pathlib import Path
 from typing import Dict, List, Any
 
 
+# Severity mapping for rules
+RULE_SEVERITY = {
+    "dup_immutable_const": "warning",
+    "risky_construct": "critical",
+    "risky_imports": "error",
+    "risky_subprocess": "error",
+    "long_function": "warning",
+    "missing_docstring": "info",
+}
+
+
 class AnalysisAgent:
     """Agent for analyzing code quality"""
 
@@ -23,6 +34,11 @@ class AnalysisAgent:
         """Generate a unique finding ID"""
         self.finding_counter += 1
         return f"ANL-{self.finding_counter:03d}"
+
+    def _add_finding(self, finding: Dict[str, Any]) -> None:
+        """Add a finding with automatic severity assignment"""
+        finding.setdefault("severity", RULE_SEVERITY.get(finding.get("rule", ""), "info"))
+        self.findings.append(finding)
 
     def run(self, target_dir: str) -> Dict[str, List[Dict[str, Any]]]:
         """
@@ -123,7 +139,7 @@ class AnalysisAgent:
 
             # Flag if referenced more than threshold
             if ref_count > self.dup_threshold:
-                self.findings.append({
+                self._add_finding({
                     'id': self._generate_finding_id(),
                     'file': file_path,
                     'start_line': const_info['line'],
@@ -159,7 +175,7 @@ class AnalysisAgent:
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name == 'subprocess':
-                        self.findings.append({
+                        self._add_finding({
                             'id': self._generate_finding_id(),
                             'file': file_path,
                             'start_line': node.lineno,
@@ -176,7 +192,7 @@ class AnalysisAgent:
                         })
 
             if risky_call:
-                self.findings.append({
+                self._add_finding({
                     'id': self._generate_finding_id(),
                     'file': file_path,
                     'start_line': node.lineno,
@@ -201,7 +217,7 @@ class AnalysisAgent:
                 length = end_line - start_line + 1
 
                 if length > 60:
-                    self.findings.append({
+                    self._add_finding({
                         'id': self._generate_finding_id(),
                         'file': file_path,
                         'start_line': start_line,
