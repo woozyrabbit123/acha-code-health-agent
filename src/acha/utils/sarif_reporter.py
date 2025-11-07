@@ -1,9 +1,10 @@
 """SARIF 2.1.0 report generator for ACHA findings"""
+
 import json
 import zlib
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Dict, List, Any, Optional
-from datetime import datetime, timezone
+from typing import Any
 
 
 class SARIFReporter:
@@ -18,7 +19,7 @@ class SARIFReporter:
         0.9: "error",  # numeric critical
         0.7: "error",  # numeric error
         0.4: "warning",  # numeric warning
-        0.1: "note"  # numeric info
+        0.1: "note",  # numeric info
     }
 
     # Rule metadata for ACHA analyzers
@@ -33,7 +34,7 @@ class SARIFReporter:
             "help": {
                 "text": "Extract duplicate constants to improve maintainability and reduce magic numbers."
             },
-            "defaultConfiguration": {"level": "warning"}
+            "defaultConfiguration": {"level": "warning"},
         },
         "risky_construct": {
             "id": "ACHA002",
@@ -45,19 +46,15 @@ class SARIFReporter:
             "help": {
                 "text": "Avoid using dangerous functions. Use safer alternatives or validate inputs carefully."
             },
-            "defaultConfiguration": {"level": "error"}
+            "defaultConfiguration": {"level": "error"},
         },
         "unused_import": {
             "id": "ACHA003",
             "name": "UnusedImport",
             "shortDescription": {"text": "Unused import statement"},
-            "fullDescription": {
-                "text": "Import statement is not used anywhere in the file."
-            },
-            "help": {
-                "text": "Remove unused imports to keep code clean and reduce dependencies."
-            },
-            "defaultConfiguration": {"level": "warning"}
+            "fullDescription": {"text": "Import statement is not used anywhere in the file."},
+            "help": {"text": "Remove unused imports to keep code clean and reduce dependencies."},
+            "defaultConfiguration": {"level": "warning"},
         },
         "magic_number": {
             "id": "ACHA004",
@@ -69,19 +66,17 @@ class SARIFReporter:
             "help": {
                 "text": "Replace magic numbers with named constants to improve code readability."
             },
-            "defaultConfiguration": {"level": "note"}
+            "defaultConfiguration": {"level": "note"},
         },
         "missing_docstring": {
             "id": "ACHA005",
             "name": "MissingDocstring",
             "shortDescription": {"text": "Function missing docstring"},
-            "fullDescription": {
-                "text": "Public function lacks documentation string."
-            },
+            "fullDescription": {"text": "Public function lacks documentation string."},
             "help": {
                 "text": "Add docstrings to document function purpose, parameters, and return values."
             },
-            "defaultConfiguration": {"level": "note"}
+            "defaultConfiguration": {"level": "note"},
         },
         "high_complexity": {
             "id": "ACHA006",
@@ -90,10 +85,8 @@ class SARIFReporter:
             "fullDescription": {
                 "text": "Function has high cyclomatic complexity, making it difficult to test and maintain."
             },
-            "help": {
-                "text": "Refactor complex functions into smaller, more focused functions."
-            },
-            "defaultConfiguration": {"level": "warning"}
+            "help": {"text": "Refactor complex functions into smaller, more focused functions."},
+            "defaultConfiguration": {"level": "warning"},
         },
         "broad_exception": {
             "id": "ACHA007",
@@ -102,10 +95,8 @@ class SARIFReporter:
             "fullDescription": {
                 "text": "Exception handler catches broad exception types (Exception, BaseException)."
             },
-            "help": {
-                "text": "Catch specific exceptions to handle errors appropriately."
-            },
-            "defaultConfiguration": {"level": "warning"}
+            "help": {"text": "Catch specific exceptions to handle errors appropriately."},
+            "defaultConfiguration": {"level": "warning"},
         },
         "broad_subprocess_shell": {
             "id": "ACHA008",
@@ -117,8 +108,8 @@ class SARIFReporter:
             "help": {
                 "text": "Avoid shell=True or carefully validate all inputs to prevent shell injection."
             },
-            "defaultConfiguration": {"level": "error"}
-        }
+            "defaultConfiguration": {"level": "error"},
+        },
     }
 
     def __init__(self, tool_name: str = "ACHA", version: str = "0.3.0"):
@@ -132,7 +123,7 @@ class SARIFReporter:
         self.tool_name = tool_name
         self.version = version
 
-    def generate(self, findings: List[Dict], base_path: Path) -> Dict:
+    def generate(self, findings: list[dict], base_path: Path) -> dict:
         """
         Convert ACHA findings to SARIF 2.1.0 format.
 
@@ -156,24 +147,21 @@ class SARIFReporter:
                             "name": self.tool_name,
                             "version": self.version,
                             "informationUri": "https://github.com/woozyrabbit123/acha-code-health-agent",
-                            "rules": self._build_rules(findings)
+                            "rules": self._build_rules(findings),
                         }
                     },
                     "results": self._build_results(findings, base_path),
                     "columnKind": "utf16CodeUnits",
                     "invocations": [
-                        {
-                            "executionSuccessful": True,
-                            "endTimeUtc": datetime.now(timezone.utc).isoformat()
-                        }
-                    ]
+                        {"executionSuccessful": True, "endTimeUtc": datetime.now(UTC).isoformat()}
+                    ],
                 }
-            ]
+            ],
         }
 
         return sarif_doc
 
-    def _build_rules(self, findings: List[Dict]) -> List[Dict]:
+    def _build_rules(self, findings: list[dict]) -> list[dict]:
         """Build rules array from findings"""
         # Collect unique rule types
         rule_types = set()
@@ -189,16 +177,18 @@ class SARIFReporter:
                 rules.append(rule_def)
             else:
                 # Generic rule for unknown types
-                rules.append({
-                    "id": f"ACHA{len(rules)+100:03d}",
-                    "name": rule_type.replace("_", " ").title().replace(" ", ""),
-                    "shortDescription": {"text": f"{rule_type} detected"},
-                    "defaultConfiguration": {"level": "warning"}
-                })
+                rules.append(
+                    {
+                        "id": f"ACHA{len(rules)+100:03d}",
+                        "name": rule_type.replace("_", " ").title().replace(" ", ""),
+                        "shortDescription": {"text": f"{rule_type} detected"},
+                        "defaultConfiguration": {"level": "warning"},
+                    }
+                )
 
         return rules
 
-    def _build_results(self, findings: List[Dict], base_path: Path) -> List[Dict]:
+    def _build_results(self, findings: list[dict], base_path: Path) -> list[dict]:
         """Build results array from findings"""
         results = []
 
@@ -209,7 +199,7 @@ class SARIFReporter:
 
         return results
 
-    def _finding_to_result(self, finding: Dict, base_path: Path) -> Optional[Dict]:
+    def _finding_to_result(self, finding: dict, base_path: Path) -> dict | None:
         """Convert a single finding to a SARIF result"""
         rule_type = finding.get("finding") or finding.get("rule", "unknown")
         rule_id = self._get_rule_id(rule_type)
@@ -234,14 +224,8 @@ class SARIFReporter:
         # Build location
         location = {
             "physicalLocation": {
-                "artifactLocation": {
-                    "uri": uri,
-                    "uriBaseId": "%SRCROOT%"
-                },
-                "region": {
-                    "startLine": start_line,
-                    "endLine": end_line
-                }
+                "artifactLocation": {"uri": uri, "uriBaseId": "%SRCROOT%"},
+                "region": {"startLine": start_line, "endLine": end_line},
             }
         }
 
@@ -257,10 +241,8 @@ class SARIFReporter:
         result = {
             "ruleId": rule_id,
             "level": level,
-            "message": {
-                "text": message_text
-            },
-            "locations": [location]
+            "message": {"text": message_text},
+            "locations": [location],
         }
 
         # Add optional fields if available
@@ -290,7 +272,7 @@ class SARIFReporter:
 
         return "warning"
 
-    def write(self, sarif_data: Dict, output_path: Path):
+    def write(self, sarif_data: dict, output_path: Path):
         """
         Write SARIF data to file.
 
@@ -301,10 +283,10 @@ class SARIFReporter:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(output_path, 'w', encoding='utf-8') as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             json.dump(sarif_data, f, indent=2, ensure_ascii=False)
 
-    def generate_and_write(self, findings: List[Dict], base_path: Path, output_path: Path):
+    def generate_and_write(self, findings: list[dict], base_path: Path, output_path: Path):
         """
         Generate SARIF report and write to file.
 

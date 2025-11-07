@@ -1,8 +1,8 @@
 """Patcher utility for generating and applying diffs"""
+
 import difflib
 import shutil
 from pathlib import Path
-from typing import Dict, List, Tuple
 
 
 class Patcher:
@@ -35,12 +35,7 @@ class Patcher:
             shutil.rmtree(self.workdir)
         shutil.copytree(source_path, self.workdir)
 
-    def generate_diff(
-        self,
-        original_content: str,
-        modified_content: str,
-        file_path: str
-    ) -> str:
+    def generate_diff(self, original_content: str, modified_content: str, file_path: str) -> str:
         """
         Generate unified diff between original and modified content.
 
@@ -60,10 +55,10 @@ class Patcher:
             modified_lines,
             fromfile=f"a/{file_path}",
             tofile=f"b/{file_path}",
-            lineterm=''
+            lineterm="",
         )
 
-        return ''.join(diff)
+        return "".join(diff)
 
     def write_patch(self, diff_content: str, patch_filename: str = "patch.diff"):
         """
@@ -76,10 +71,10 @@ class Patcher:
         self.dist_dir.mkdir(exist_ok=True)
         patch_path = self.dist_dir / patch_filename
 
-        with open(patch_path, 'w', encoding='utf-8') as f:
+        with open(patch_path, "w", encoding="utf-8") as f:
             f.write(diff_content)
 
-    def apply_modifications(self, modifications: Dict[str, str]):
+    def apply_modifications(self, modifications: dict[str, str]):
         """
         Apply modifications to files in workdir.
 
@@ -90,10 +85,10 @@ class Patcher:
             target_file = self.workdir / file_path
             target_file.parent.mkdir(parents=True, exist_ok=True)
 
-            with open(target_file, 'w', encoding='utf-8') as f:
+            with open(target_file, "w", encoding="utf-8") as f:
                 f.write(new_content)
 
-    def count_diff_stats(self, diff_content: str) -> Tuple[int, int]:
+    def count_diff_stats(self, diff_content: str) -> tuple[int, int]:
         """
         Count lines added and removed from a diff.
 
@@ -106,10 +101,10 @@ class Patcher:
         lines_added = 0
         lines_removed = 0
 
-        for line in diff_content.split('\n'):
-            if line.startswith('+') and not line.startswith('+++'):
+        for line in diff_content.split("\n"):
+            if line.startswith("+") and not line.startswith("+++"):
                 lines_added += 1
-            elif line.startswith('-') and not line.startswith('---'):
+            elif line.startswith("-") and not line.startswith("---"):
                 lines_removed += 1
 
         return lines_added, lines_removed

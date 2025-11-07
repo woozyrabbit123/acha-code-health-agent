@@ -1,12 +1,14 @@
 """JSONL session logger for structured output."""
+
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class JSONLLogger:
     """Append-only JSONL logger with simple size-based rotation."""
+
     def __init__(self, log_path: Path, max_size_mb: float = 1.0):
         self.log_path = log_path
         self.max_size_bytes = int(max_size_mb * 1024 * 1024)
@@ -19,7 +21,7 @@ class JSONLLogger:
             rotated = self.log_path.with_suffix(f".{ts}.jsonl")
             self.log_path.rename(rotated)
 
-    def log(self, event_type: str, data: Dict[str, Any]) -> None:
+    def log(self, event_type: str, data: dict[str, Any]) -> None:
         entry = {
             "timestamp": datetime.utcnow().isoformat(),
             "event": event_type,
@@ -35,16 +37,19 @@ class JSONLLogger:
 
 
 # Global singleton
-_session_logger: Optional[JSONLLogger] = None
+_session_logger: JSONLLogger | None = None
+
 
 def init_session_logger(path: Path = Path("reports/session.jsonl")) -> None:
     global _session_logger
     _session_logger = JSONLLogger(path)
     _session_logger.log("session_start", {"version": "0.2.0"})
 
-def log_event(event_type: str, data: Dict[str, Any]) -> None:
+
+def log_event(event_type: str, data: dict[str, Any]) -> None:
     if _session_logger:
         _session_logger.log(event_type, data)
+
 
 def close_session_logger() -> None:
     global _session_logger

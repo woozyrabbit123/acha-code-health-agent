@@ -1,9 +1,10 @@
 """Parallel execution utilities for performance"""
-import ast
+
+import sys
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import List, Dict, Callable, Any
-import sys
+from typing import Any
 
 
 class ParallelExecutor:
@@ -20,7 +21,9 @@ class ParallelExecutor:
         self.max_workers = max_workers
         self.verbose = verbose
 
-    def analyze_files(self, files: List[Path], analyze_func: Callable[[Path], List[Dict]]) -> List[Dict]:
+    def analyze_files(
+        self, files: list[Path], analyze_func: Callable[[Path], list[dict]]
+    ) -> list[dict]:
         """
         Analyze multiple files in parallel, maintaining order.
 
@@ -47,8 +50,7 @@ class ParallelExecutor:
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             # Submit all files
             future_to_file = {
-                executor.submit(analyze_func, file_path): file_path
-                for file_path in files
+                executor.submit(analyze_func, file_path): file_path for file_path in files
             }
 
             # Collect results as they complete
@@ -75,7 +77,7 @@ class ParallelExecutor:
 
         return all_findings
 
-    def map_parallel(self, func: Callable[[Any], Any], items: List[Any]) -> List[Any]:
+    def map_parallel(self, func: Callable[[Any], Any], items: list[Any]) -> list[Any]:
         """
         Map a function over items in parallel.
 
@@ -96,10 +98,7 @@ class ParallelExecutor:
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             # Submit all items with their indices
-            future_to_index = {
-                executor.submit(func, item): idx
-                for idx, item in enumerate(items)
-            }
+            future_to_index = {executor.submit(func, item): idx for idx, item in enumerate(items)}
 
             # Collect results maintaining order
             for future in as_completed(future_to_index):

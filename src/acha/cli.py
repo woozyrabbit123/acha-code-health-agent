@@ -7,33 +7,42 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
+
 from acha.agents.analysis_agent import AnalysisAgent
 from acha.agents.refactor_agent import RefactorAgent
 from acha.agents.validation_agent import ValidationAgent
+from acha.utils.ast_cache import ASTCache
 from acha.utils.checkpoint import checkpoint, restore
 from acha.utils.exporter import build_proof_pack
-from acha.utils.logger import init_session_logger, log_event, close_session_logger
-from acha.utils.policy import PolicyConfig, PolicyEnforcer
-from acha.utils.ast_cache import ASTCache
-from acha.utils.sarif_reporter import SARIFReporter
 from acha.utils.html_reporter import HTMLReporter
-import os
+from acha.utils.logger import close_session_logger, init_session_logger, log_event
+from acha.utils.policy import PolicyConfig, PolicyEnforcer
+from acha.utils.sarif_reporter import SARIFReporter
+
+# Force UTF-8 encoding on Windows to prevent charmap codec errors
+if sys.platform == "win32":
+    import io
+
+    if sys.stdout.encoding != "utf-8":
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    if sys.stderr.encoding != "utf-8":
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 
 def analyze(args):
     """Run code analysis"""
     # Support multiple targets for batch mode
-    targets = getattr(args, 'targets', None) or [args.target]
+    targets = getattr(args, "targets", None) or [args.target]
 
     # Setup cache if enabled
     cache = None
-    use_cache = getattr(args, 'cache', True)
+    use_cache = getattr(args, "cache", True)
     if use_cache:
         cache = ASTCache()
 
     # Setup parallel execution
-    parallel = getattr(args, 'parallel', False)
-    max_workers = getattr(args, 'max_workers', 4)
+    parallel = getattr(args, "parallel", False)
+    max_workers = getattr(args, "max_workers", 4)
 
     # Auto-detect parallel if not specified
     if parallel is None:
@@ -61,49 +70,47 @@ def analyze(args):
     reports_dir.mkdir(exist_ok=True)
 
     # Get output format
-    output_format = getattr(args, 'output_format', 'json')
+    output_format = getattr(args, "output_format", "json")
 
     # Always write JSON (required for other tools)
     json_path = reports_dir / "analysis.json"
-    with open(json_path, 'w', encoding='utf-8') as f:
+    with open(json_path, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2)
 
     output_files = [str(json_path)]
 
     # Generate SARIF output if requested
-    if output_format in ['sarif', 'all']:
+    if output_format in ["sarif", "all"]:
         sarif_reporter = SARIFReporter(tool_name="ACHA", version="0.3.0")
         sarif_path = reports_dir / "analysis.sarif"
         sarif_reporter.generate_and_write(
-            findings=result.get('findings', []),
+            findings=result.get("findings", []),
             base_path=Path(targets[0]).resolve(),
-            output_path=sarif_path
+            output_path=sarif_path,
         )
         output_files.append(str(sarif_path))
 
     # Generate HTML output if requested
-    if output_format in ['html', 'all']:
+    if output_format in ["html", "all"]:
         html_reporter = HTMLReporter()
         html_path = reports_dir / "report.html"
         html_reporter.generate_and_write(
-            output_path=html_path,
-            analysis=result,
-            target_path=targets[0]
+            output_path=html_path, analysis=result, target_path=targets[0]
         )
         output_files.append(str(html_path))
 
     # Print summary
-    findings_count = len(result.get('findings', []))
-    print(f"\nAnalysis complete!")
+    findings_count = len(result.get("findings", []))
+    print("\nAnalysis complete!")
     print(f"Total findings: {findings_count}")
-    print(f"Reports written to:")
+    print("Reports written to:")
     for output_file in output_files:
         print(f"  - {output_file}")
 
     # Count findings by type
     finding_types = {}
-    for finding in result.get('findings', []):
-        ftype = finding.get('finding', 'unknown')
+    for finding in result.get("findings", []):
+        ftype = finding.get("finding", "unknown")
         finding_types[ftype] = finding_types.get(ftype, 0) + 1
 
     if finding_types:
@@ -124,8 +131,8 @@ def refactor(args):
 
     # Parse refactor types
     refactor_types = None
-    if hasattr(args, 'refactor_types') and args.refactor_types:
-        refactor_types = [rt.strip() for rt in args.refactor_types.split(',')]
+    if hasattr(args, "refactor_types") and args.refactor_types:
+        refactor_types = [rt.strip() for rt in args.refactor_types.split(",")]
         print(f"Refactor types: {', '.join(refactor_types)}")
 
     # Run refactoring
@@ -142,21 +149,21 @@ def refactor(args):
 
     # Write patch summary to reports/patch_summary.json
     summary_path = reports_dir / "patch_summary.json"
-    with open(summary_path, 'w', encoding='utf-8') as f:
+    with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(patch_summary, f, indent=2)
 
     # Print summary
-    print(f"\nRefactoring complete!")
+    print("\nRefactoring complete!")
     print(f"Patch ID: {patch_summary['patch_id']}")
     print(f"Files touched: {len(patch_summary['files_touched'])}")
     print(f"Lines added: {patch_summary['lines_added']}")
     print(f"Lines removed: {patch_summary['lines_removed']}")
-    print(f"Diff written to: dist/patch.diff")
+    print("Diff written to: dist/patch.diff")
     print(f"Summary written to: {summary_path}")
 
-    if patch_summary.get('notes'):
+    if patch_summary.get("notes"):
         print("\nNotes:")
-        for note in patch_summary['notes']:
+        for note in patch_summary["notes"]:
             print(f"  - {note}")
 
     return 0
@@ -179,9 +186,9 @@ def validate(args):
     patch_id = "no-patch"
     patch_summary_path = Path("reports/patch_summary.json")
     if patch_summary_path.exists():
-        with open(patch_summary_path, 'r', encoding='utf-8') as f:
+        with open(patch_summary_path, encoding="utf-8") as f:
             patch_summary = json.load(f)
-            patch_id = patch_summary.get('patch_id', 'no-patch')
+            patch_id = patch_summary.get("patch_id", "no-patch")
 
     # Create checkpoint before validation
     checkpoint_dir = ".checkpoints/LATEST"
@@ -207,21 +214,21 @@ def validate(args):
 
     # Write results to reports/validate.json
     validate_path = reports_dir / "validate.json"
-    with open(validate_path, 'w', encoding='utf-8') as f:
+    with open(validate_path, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2)
 
     # Print summary
-    print(f"\nValidation complete!")
+    print("\nValidation complete!")
     print(f"Status: {result['status'].upper()}")
     print(f"Tests run: {result['tests_run']}")
     print(f"Duration: {result['duration_s']}s")
     print(f"Report written to: {validate_path}")
-    print(f"Test output saved to: reports/test_output.txt")
+    print("Test output saved to: reports/test_output.txt")
 
     # Handle failure - restore from checkpoint
-    if result['status'] == 'fail':
+    if result["status"] == "fail":
         print(f"\nTests FAILED - {len(result['failing_tests'])} failing test(s)")
-        for test in result['failing_tests']:
+        for test in result["failing_tests"]:
             print(f"  - {test}")
 
         print(f"\nRestoring from checkpoint to: {validate_dir}")
@@ -232,11 +239,11 @@ def validate(args):
             print(f"✗ Failed to restore: {e}")
 
         return 1
-    elif result['status'] == 'pass':
+    elif result["status"] == "pass":
         print("\n✓ All tests passed!")
         return 0
     else:
-        print(f"\n✗ Validation error")
+        print("\n✗ Validation error")
         return 1
 
 
@@ -246,7 +253,7 @@ def export(args):
 
     try:
         zip_path = build_proof_pack()
-        print(f"\n✓ Proof pack created successfully!")
+        print("\n✓ Proof pack created successfully!")
         print(zip_path)
         return 0
     except FileNotFoundError as e:
@@ -266,10 +273,15 @@ def run_pipeline_command(args, policy=None):
 
     # Parse refactor types
     refactor_types = None
-    if hasattr(args, 'refactor_types') and args.refactor_types:
-        refactor_types = [rt.strip() for rt in args.refactor_types.split(',')]
-    elif hasattr(args, 'aggressive') and args.aggressive:
-        refactor_types = ["inline_const", "remove_unused_import", "organize_imports", "harden_subprocess"]
+    if hasattr(args, "refactor_types") and args.refactor_types:
+        refactor_types = [rt.strip() for rt in args.refactor_types.split(",")]
+    elif hasattr(args, "aggressive") and args.aggressive:
+        refactor_types = [
+            "inline_const",
+            "remove_unused_import",
+            "organize_imports",
+            "harden_subprocess",
+        ]
 
     log_event("pipeline_start", {"target": str(target_dir)})
 
@@ -284,7 +296,7 @@ def run_pipeline_command(args, policy=None):
         """Log message with ISO timestamp"""
         timestamp = datetime.utcnow().isoformat() + "Z"
         log_line = f"[{timestamp}] {msg}\n"
-        with open(log_path, 'a', encoding='utf-8') as f:
+        with open(log_path, "a", encoding="utf-8") as f:
             f.write(log_line)
         print(msg)
 
@@ -309,11 +321,12 @@ def run_pipeline_command(args, policy=None):
 
     class Args:
         """Mock args object for internal function calls"""
+
         pass
 
     analyze_args = Args()
     analyze_args.target = target_dir
-    analyze_args.output_format = 'all'  # Generate JSON, SARIF, and HTML
+    analyze_args.output_format = "all"  # Generate JSON, SARIF, and HTML
     analyze_args.parallel = True
     analyze_args.cache = True
     analyze_args.max_workers = 4
@@ -325,10 +338,10 @@ def run_pipeline_command(args, policy=None):
 
     # Load analysis results
     analysis_path = reports_dir / "analysis.json"
-    with open(analysis_path, 'r', encoding='utf-8') as f:
+    with open(analysis_path, encoding="utf-8") as f:
         analysis_data = json.load(f)
 
-    findings_count = len(analysis_data.get('findings', []))
+    findings_count = len(analysis_data.get("findings", []))
     log(f"✓ Analysis complete: {findings_count} findings")
     log("")
 
@@ -336,11 +349,10 @@ def run_pipeline_command(args, policy=None):
     if policy:
         # Convert findings to issues format for policy enforcer
         issues_for_policy = []
-        for finding in analysis_data.get('findings', []):
-            issues_for_policy.append({
-                "rule": finding.get("finding", ""),
-                "severity": finding.get("severity", "info")
-            })
+        for finding in analysis_data.get("findings", []):
+            issues_for_policy.append(
+                {"rule": finding.get("finding", ""), "severity": finding.get("severity", "info")}
+            )
         policy_results = {"issues": issues_for_policy}
 
         enforcer = PolicyEnforcer(policy)
@@ -353,11 +365,12 @@ def run_pipeline_command(args, policy=None):
     # Check for risky constructs if --fail-on-risky
     if fail_on_risky:
         risky_findings = [
-            f for f in analysis_data.get('findings', [])
-            if f.get('finding') == 'risky_construct'
+            f for f in analysis_data.get("findings", []) if f.get("finding") == "risky_construct"
         ]
         if risky_findings:
-            log(f"✗ Found {len(risky_findings)} risky construct(s) - failing due to --fail-on-risky")
+            log(
+                f"✗ Found {len(risky_findings)} risky construct(s) - failing due to --fail-on-risky"
+            )
             for finding in risky_findings:
                 log(f"  {finding['file']}:{finding['start_line']} - {finding['rationale']}")
             return 1
@@ -377,9 +390,9 @@ def run_pipeline_command(args, policy=None):
             "files_touched": [],
             "lines_added": 0,
             "lines_removed": 0,
-            "notes": ["Refactoring skipped via --no-refactor flag"]
+            "notes": ["Refactoring skipped via --no-refactor flag"],
         }
-        with open(reports_dir / "patch_summary.json", 'w', encoding='utf-8') as f:
+        with open(reports_dir / "patch_summary.json", "w", encoding="utf-8") as f:
             json.dump(dummy_patch, f, indent=2)
     elif findings_count == 0:
         log("STEP 2: REFACTOR (SKIPPED)")
@@ -393,9 +406,9 @@ def run_pipeline_command(args, policy=None):
             "files_touched": [],
             "lines_added": 0,
             "lines_removed": 0,
-            "notes": ["No findings to refactor"]
+            "notes": ["No findings to refactor"],
         }
-        with open(reports_dir / "patch_summary.json", 'w', encoding='utf-8') as f:
+        with open(reports_dir / "patch_summary.json", "w", encoding="utf-8") as f:
             json.dump(dummy_patch, f, indent=2)
     else:
         log("STEP 2: REFACTOR")
@@ -405,7 +418,7 @@ def run_pipeline_command(args, policy=None):
         refactor_args.target = target_dir
         refactor_args.analysis = str(analysis_path)
         if refactor_types:
-            refactor_args.refactor_types = ','.join(refactor_types)
+            refactor_args.refactor_types = ",".join(refactor_types)
         else:
             refactor_args.refactor_types = None
 
@@ -415,9 +428,9 @@ def run_pipeline_command(args, policy=None):
             return 1
 
         # Load patch summary
-        with open(reports_dir / "patch_summary.json", 'r', encoding='utf-8') as f:
+        with open(reports_dir / "patch_summary.json", encoding="utf-8") as f:
             patch_data = json.load(f)
-        patch_id = patch_data.get('patch_id', 'no-patch')
+        patch_id = patch_data.get("patch_id", "no-patch")
 
         log(f"✓ Refactoring complete: patch_id={patch_id}")
         log("")
@@ -434,16 +447,18 @@ def run_pipeline_command(args, policy=None):
 
     # Load validation results
     validate_path = reports_dir / "validate.json"
-    with open(validate_path, 'r', encoding='utf-8') as f:
+    with open(validate_path, encoding="utf-8") as f:
         validate_data = json.load(f)
 
-    status = validate_data.get('status', 'unknown')
+    status = validate_data.get("status", "unknown")
 
-    if result != 0 or status != 'pass':
+    if result != 0 or status != "pass":
         log(f"✗ Validation failed: status={status}")
         return 1
 
-    log(f"✓ Validation passed: {validate_data.get('tests_run', 0)} tests in {validate_data.get('duration_s', 0)}s")
+    log(
+        f"✓ Validation passed: {validate_data.get('tests_run', 0)} tests in {validate_data.get('duration_s', 0)}s"
+    )
     log("")
 
     # Step 4: EXPORT
@@ -477,57 +492,88 @@ def run_pipeline_command(args, policy=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        prog='acha',
-        description='ACHA - AI Code Health Agent'
-    )
+    parser = argparse.ArgumentParser(prog="acha", description="ACHA - AI Code Health Agent")
 
     # Global flags
     parser.add_argument("--config", type=Path, help="Path to configuration file (JSON)")
     parser.add_argument("--policy", type=Path, help="Path to policy file (JSON quality gates)")
-    parser.add_argument("--format", choices=["text", "json", "jsonl"], default="text",
-                        help="Output format for stdout (default: text)")
-    parser.add_argument("--session-log", type=Path, default=Path("reports/session.jsonl"),
-                        help="Path for JSONL session log")
+    parser.add_argument(
+        "--format",
+        choices=["text", "json", "jsonl"],
+        default="text",
+        help="Output format for stdout (default: text)",
+    )
+    parser.add_argument(
+        "--session-log",
+        type=Path,
+        default=Path("reports/session.jsonl"),
+        help="Path for JSONL session log",
+    )
 
-    subparsers = parser.add_subparsers(dest='command', help='Available commands')
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # analyze subcommand
-    parser_analyze = subparsers.add_parser('analyze', help='Analyze code quality')
-    parser_analyze.add_argument('--target', required=True, help='Target directory to analyze')
-    parser_analyze.add_argument('--output-format', choices=['json', 'sarif', 'html', 'all'], default='json',
-                                help='Output format (default: json)')
-    parser_analyze.add_argument('--parallel', action='store_true', default=True, help='Enable parallel analysis (default: enabled)')
-    parser_analyze.add_argument('--no-parallel', action='store_false', dest='parallel', help='Disable parallel analysis')
-    parser_analyze.add_argument('--max-workers', type=int, default=4, help='Number of worker threads (default: 4)')
-    parser_analyze.add_argument('--cache', action='store_true', default=True, help='Enable AST cache (default: enabled)')
-    parser_analyze.add_argument('--no-cache', action='store_false', dest='cache', help='Disable AST cache')
+    parser_analyze = subparsers.add_parser("analyze", help="Analyze code quality")
+    parser_analyze.add_argument("--target", required=True, help="Target directory to analyze")
+    parser_analyze.add_argument(
+        "--output-format",
+        choices=["json", "sarif", "html", "all"],
+        default="json",
+        help="Output format (default: json)",
+    )
+    parser_analyze.add_argument(
+        "--parallel",
+        action="store_true",
+        default=True,
+        help="Enable parallel analysis (default: enabled)",
+    )
+    parser_analyze.add_argument(
+        "--no-parallel", action="store_false", dest="parallel", help="Disable parallel analysis"
+    )
+    parser_analyze.add_argument(
+        "--max-workers", type=int, default=4, help="Number of worker threads (default: 4)"
+    )
+    parser_analyze.add_argument(
+        "--cache", action="store_true", default=True, help="Enable AST cache (default: enabled)"
+    )
+    parser_analyze.add_argument(
+        "--no-cache", action="store_false", dest="cache", help="Disable AST cache"
+    )
     parser_analyze.set_defaults(func=analyze)
 
     # refactor subcommand
-    parser_refactor = subparsers.add_parser('refactor', help='Refactor code')
-    parser_refactor.add_argument('--target', required=True, help='Target directory to refactor')
-    parser_refactor.add_argument('--analysis', required=True, help='Path to analysis.json file')
-    parser_refactor.add_argument('--refactor-types', help='Comma-separated list of refactor types (default: inline_const,remove_unused_import)')
+    parser_refactor = subparsers.add_parser("refactor", help="Refactor code")
+    parser_refactor.add_argument("--target", required=True, help="Target directory to refactor")
+    parser_refactor.add_argument("--analysis", required=True, help="Path to analysis.json file")
+    parser_refactor.add_argument(
+        "--refactor-types",
+        help="Comma-separated list of refactor types (default: inline_const,remove_unused_import)",
+    )
     parser_refactor.set_defaults(func=refactor)
 
     # validate subcommand
-    parser_validate = subparsers.add_parser('validate', help='Validate changes')
-    parser_validate.add_argument('--target', required=True, help='Target directory to validate')
+    parser_validate = subparsers.add_parser("validate", help="Validate changes")
+    parser_validate.add_argument("--target", required=True, help="Target directory to validate")
     parser_validate.set_defaults(func=validate)
 
     # export subcommand
-    parser_export = subparsers.add_parser('export', help='Export reports')
+    parser_export = subparsers.add_parser("export", help="Export reports")
     parser_export.set_defaults(func=export)
 
     # run subcommand
-    parser_run = subparsers.add_parser('run', help='Run full pipeline')
-    parser_run.add_argument('--target', default='./sample_project', help='Target directory (default: ./sample_project)')
-    parser_run.add_argument('--no-refactor', action='store_true', help='Skip refactoring step')
-    parser_run.add_argument('--fail-on-risky', action='store_true', help='Fail if risky constructs found')
-    parser_run.add_argument('--timeout', type=int, default=30, help='Test timeout in seconds (default: 30)')
-    parser_run.add_argument('--refactor-types', help='Comma-separated list of refactor types')
-    parser_run.add_argument('--aggressive', action='store_true', help='Enable all refactor types')
+    parser_run = subparsers.add_parser("run", help="Run full pipeline")
+    parser_run.add_argument(
+        "--target", default="./sample_project", help="Target directory (default: ./sample_project)"
+    )
+    parser_run.add_argument("--no-refactor", action="store_true", help="Skip refactoring step")
+    parser_run.add_argument(
+        "--fail-on-risky", action="store_true", help="Fail if risky constructs found"
+    )
+    parser_run.add_argument(
+        "--timeout", type=int, default=30, help="Test timeout in seconds (default: 30)"
+    )
+    parser_run.add_argument("--refactor-types", help="Comma-separated list of refactor types")
+    parser_run.add_argument("--aggressive", action="store_true", help="Enable all refactor types")
     parser_run.set_defaults(func=run_pipeline_command)
 
     args = parser.parse_args()
@@ -560,5 +606,5 @@ def main():
         close_session_logger()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

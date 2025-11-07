@@ -1,17 +1,20 @@
 """Refactor Agent - applies safe transformations"""
+
 import ast
 import json
 import re
 import uuid
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Set
-from acha.utils.patcher import Patcher
+from typing import Any
+
 from acha.utils.import_analyzer import classify_import
+from acha.utils.patcher import Patcher
 
 
 class RefactorType(Enum):
     """Types of refactorings available"""
+
     INLINE_CONST = "inline_const"
     REMOVE_UNUSED_IMPORT = "remove_unused_import"
     ORGANIZE_IMPORTS = "organize_imports"
@@ -21,7 +24,7 @@ class RefactorType(Enum):
 class RefactorAgent:
     """Agent for refactoring code based on analysis findings"""
 
-    def __init__(self, refactor_types: Optional[List[str]] = None):
+    def __init__(self, refactor_types: list[str] | None = None):
         """
         Initialize RefactorAgent.
 
@@ -37,14 +40,14 @@ class RefactorAgent:
         if refactor_types is None:
             refactor_types = ["inline_const", "remove_unused_import"]
 
-        self.enabled_refactors: Set[RefactorType] = set()
+        self.enabled_refactors: set[RefactorType] = set()
         for rt in refactor_types:
             try:
                 self.enabled_refactors.add(RefactorType(rt))
             except ValueError:
                 self.notes.append(f"Unknown refactor type: {rt}")
 
-    def apply(self, target_dir: str, analysis_json_path: str) -> Dict[str, Any]:
+    def apply(self, target_dir: str, analysis_json_path: str) -> dict[str, Any]:
         """
         Apply refactoring based on analysis findings.
 
@@ -64,10 +67,10 @@ class RefactorAgent:
             raise ValueError(f"Analysis file does not exist: {analysis_json_path}")
 
         # Load analysis findings
-        with open(analysis_path, 'r', encoding='utf-8') as f:
+        with open(analysis_path, encoding="utf-8") as f:
             analysis = json.load(f)
 
-        findings = analysis.get('findings', [])
+        findings = analysis.get("findings", [])
 
         self.modifications = {}
         self.notes = []
@@ -78,18 +81,14 @@ class RefactorAgent:
 
         # Process findings based on enabled refactor types
         if RefactorType.INLINE_CONST in self.enabled_refactors:
-            dup_const_findings = [
-                f for f in findings if f.get('finding') == 'dup_immutable_const'
-            ]
+            dup_const_findings = [f for f in findings if f.get("finding") == "dup_immutable_const"]
             for finding in dup_const_findings:
                 self._process_dup_const_finding(finding, target_path)
             if dup_const_findings:
                 refactor_types_applied.append("inline_const")
 
         if RefactorType.REMOVE_UNUSED_IMPORT in self.enabled_refactors:
-            unused_import_findings = [
-                f for f in findings if f.get('finding') == 'unused_import'
-            ]
+            unused_import_findings = [f for f in findings if f.get("finding") == "unused_import"]
             self._process_unused_imports(unused_import_findings, target_path)
             if unused_import_findings:
                 refactor_types_applied.append("remove_unused_import")
@@ -100,7 +99,7 @@ class RefactorAgent:
 
         if RefactorType.HARDEN_SUBPROCESS in self.enabled_refactors:
             subprocess_findings = [
-                f for f in findings if f.get('finding') == 'broad_subprocess_shell'
+                f for f in findings if f.get("finding") == "broad_subprocess_shell"
             ]
             self._process_subprocess_hardening(subprocess_findings, target_path)
             if subprocess_findings:
@@ -110,14 +109,14 @@ class RefactorAgent:
         all_diffs = []
         for file_path, new_content in self.modifications.items():
             original_file = target_path / file_path
-            with open(original_file, 'r', encoding='utf-8') as f:
+            with open(original_file, encoding="utf-8") as f:
                 original_content = f.read()
 
             diff = self.patcher.generate_diff(original_content, new_content, file_path)
             if diff:
                 all_diffs.append(diff)
 
-        combined_diff = '\n'.join(all_diffs)
+        combined_diff = "\n".join(all_diffs)
         self.patcher.write_patch(combined_diff)
 
         # Apply modifications to workdir
@@ -128,20 +127,20 @@ class RefactorAgent:
 
         # Generate patch summary
         patch_summary = {
-            'patch_id': str(uuid.uuid4()),
-            'files_touched': list(self.modifications.keys()),
-            'lines_added': lines_added,
-            'lines_removed': lines_removed,
-            'notes': self.notes,
-            'refactor_types_applied': refactor_types_applied
+            "patch_id": str(uuid.uuid4()),
+            "files_touched": list(self.modifications.keys()),
+            "lines_added": lines_added,
+            "lines_removed": lines_removed,
+            "notes": self.notes,
+            "refactor_types_applied": refactor_types_applied,
         }
 
         return patch_summary
 
-    def _process_dup_const_finding(self, finding: Dict[str, Any], target_path: Path):
+    def _process_dup_const_finding(self, finding: dict[str, Any], target_path: Path):
         """Process a single dup_immutable_const finding"""
-        file_path = finding.get('file')
-        start_line = finding.get('start_line')
+        file_path = finding.get("file")
+        start_line = finding.get("start_line")
 
         if not file_path or not start_line:
             self.notes.append(f"Skipping finding {finding.get('id')}: missing file or line info")
@@ -154,9 +153,9 @@ class RefactorAgent:
             return
 
         try:
-            with open(source_file, 'r', encoding='utf-8') as f:
+            with open(source_file, encoding="utf-8") as f:
                 content = f.read()
-                lines = content.split('\n')
+                lines = content.split("\n")
         except Exception as e:
             self.notes.append(f"Skipping {file_path}: cannot read file - {e}")
             return
@@ -173,8 +172,8 @@ class RefactorAgent:
             self.notes.append(f"Skipping {file_path}:{start_line}: cannot identify constant")
             return
 
-        const_name = const_info['name']
-        const_value = const_info['value']
+        const_name = const_info["name"]
+        const_value = const_info["value"]
 
         # Inline the constant
         modified_content = self._inline_constant(
@@ -187,13 +186,13 @@ class RefactorAgent:
         else:
             self.notes.append(f"No changes for constant '{const_name}' in {file_path}")
 
-    def _process_unused_imports(self, findings: List[Dict[str, Any]], target_path: Path):
+    def _process_unused_imports(self, findings: list[dict[str, Any]], target_path: Path):
         """Remove unused imports from files"""
         # Group findings by file
         files_with_unused = {}
         for finding in findings:
-            file_path = finding.get('file')
-            line = finding.get('start_line')
+            file_path = finding.get("file")
+            line = finding.get("start_line")
             if file_path and line:
                 if file_path not in files_with_unused:
                     files_with_unused[file_path] = []
@@ -202,7 +201,9 @@ class RefactorAgent:
         for file_path, unused_lines in files_with_unused.items():
             self._remove_unused_imports_from_file(file_path, set(unused_lines), target_path)
 
-    def _remove_unused_imports_from_file(self, file_path: str, unused_lines: Set[int], target_path: Path):
+    def _remove_unused_imports_from_file(
+        self, file_path: str, unused_lines: set[int], target_path: Path
+    ):
         """Remove unused imports from a single file, handling multi-import statements"""
         source_file = target_path / file_path
 
@@ -210,7 +211,7 @@ class RefactorAgent:
             return
 
         try:
-            with open(source_file, 'r', encoding='utf-8') as f:
+            with open(source_file, encoding="utf-8") as f:
                 content = f.read()
         except Exception:
             return
@@ -219,12 +220,12 @@ class RefactorAgent:
             tree = ast.parse(content)
         except SyntaxError:
             # If we can't parse, fall back to simple line removal
-            lines = content.split('\n')
+            lines = content.split("\n")
             modified_lines = []
             for i, line in enumerate(lines, start=1):
                 if i not in unused_lines:
                     modified_lines.append(line)
-            modified_content = '\n'.join(modified_lines)
+            modified_content = "\n".join(modified_lines)
             if modified_content != content:
                 self.modifications[file_path] = modified_content
                 self.notes.append(f"Removed {len(unused_lines)} unused import(s) from {file_path}")
@@ -233,13 +234,13 @@ class RefactorAgent:
         # For proper handling, we remove entire import lines
         # Multi-import analysis would require tracking which specific name is unused,
         # which is beyond the current analyzer's capability
-        lines = content.split('\n')
+        lines = content.split("\n")
         modified_lines = []
         for i, line in enumerate(lines, start=1):
             if i not in unused_lines:
                 modified_lines.append(line)
 
-        modified_content = '\n'.join(modified_lines)
+        modified_content = "\n".join(modified_lines)
 
         if modified_content != content:
             self.modifications[file_path] = modified_content
@@ -261,7 +262,7 @@ class RefactorAgent:
             return
 
         try:
-            with open(source_file, 'r', encoding='utf-8') as f:
+            with open(source_file, encoding="utf-8") as f:
                 content = f.read()
         except Exception:
             return
@@ -273,20 +274,20 @@ class RefactorAgent:
 
         # Find all imports at module level
         future_imports = []
-        imports = {'stdlib': [], 'third_party': [], 'local': []}
+        imports = {"stdlib": [], "third_party": [], "local": []}
         non_import_start = 0
 
         for i, node in enumerate(tree.body):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 # Check for __future__ imports - these MUST come first
-                if isinstance(node, ast.ImportFrom) and node.module == '__future__':
+                if isinstance(node, ast.ImportFrom) and node.module == "__future__":
                     future_imports.append(ast.unparse(node))
                 else:
                     # Classify and store regular imports
                     if isinstance(node, ast.Import):
                         module = node.names[0].name
                     else:
-                        module = node.module or ''
+                        module = node.module or ""
 
                     classification = classify_import(module)
                     imports[classification].append(ast.unparse(node))
@@ -305,21 +306,21 @@ class RefactorAgent:
         # __future__ imports MUST be first (Python requirement)
         if future_imports:
             organized_imports.extend(sorted(set(future_imports)))
-            organized_imports.append('')  # Blank line after __future__
+            organized_imports.append("")  # Blank line after __future__
 
         # Sort within each group and deduplicate
-        for group in ['stdlib', 'third_party', 'local']:
+        for group in ["stdlib", "third_party", "local"]:
             group_imports = sorted(set(imports[group]))
             if group_imports:
                 organized_imports.extend(group_imports)
-                organized_imports.append('')  # Blank line between groups
+                organized_imports.append("")  # Blank line between groups
 
         # Remove trailing blank line
-        while organized_imports and organized_imports[-1] == '':
+        while organized_imports and organized_imports[-1] == "":
             organized_imports.pop()
 
         # Reconstruct file
-        lines = content.split('\n')
+        lines = content.split("\n")
 
         # Find the line where imports end
         import_end_line = 0
@@ -329,12 +330,16 @@ class RefactorAgent:
 
         # Keep module docstring if present
         docstring_lines = []
-        if tree.body and isinstance(tree.body[0], ast.Expr) and isinstance(tree.body[0].value, (ast.Str, ast.Constant)):
+        if (
+            tree.body
+            and isinstance(tree.body[0], ast.Expr)
+            and isinstance(tree.body[0].value, (ast.Str, ast.Constant))
+        ):
             # Has docstring
             docstring_node = tree.body[0]
             docstring_end = docstring_node.end_lineno or docstring_node.lineno
             docstring_lines = lines[:docstring_end]
-            docstring_lines.append('')  # Blank line after docstring
+            docstring_lines.append("")  # Blank line after docstring
 
         # Rest of the code (after imports)
         rest_of_code = lines[import_end_line:] if import_end_line < len(lines) else []
@@ -345,22 +350,22 @@ class RefactorAgent:
 
         # Combine
         if docstring_lines:
-            modified_lines = docstring_lines + organized_imports + ['', ''] + rest_of_code
+            modified_lines = docstring_lines + organized_imports + ["", ""] + rest_of_code
         else:
-            modified_lines = organized_imports + ['', ''] + rest_of_code
+            modified_lines = organized_imports + ["", ""] + rest_of_code
 
-        modified_content = '\n'.join(modified_lines)
+        modified_content = "\n".join(modified_lines)
 
         if modified_content != content:
             self.modifications[file_path] = modified_content
             self.notes.append(f"Organized imports in {file_path}")
 
-    def _process_subprocess_hardening(self, findings: List[Dict[str, Any]], target_path: Path):
+    def _process_subprocess_hardening(self, findings: list[dict[str, Any]], target_path: Path):
         """Harden subprocess calls by removing shell=True"""
         files_with_subprocess = {}
         for finding in findings:
-            file_path = finding.get('file')
-            line = finding.get('start_line')
+            file_path = finding.get("file")
+            line = finding.get("start_line")
             if file_path and line:
                 if file_path not in files_with_subprocess:
                     files_with_subprocess[file_path] = []
@@ -369,7 +374,7 @@ class RefactorAgent:
         for file_path, lines_to_fix in files_with_subprocess.items():
             self._harden_subprocess_in_file(file_path, set(lines_to_fix), target_path)
 
-    def _harden_subprocess_in_file(self, file_path: str, lines_to_fix: Set[int], target_path: Path):
+    def _harden_subprocess_in_file(self, file_path: str, lines_to_fix: set[int], target_path: Path):
         """Harden subprocess calls in a single file using AST manipulation"""
         source_file = target_path / file_path
 
@@ -377,7 +382,7 @@ class RefactorAgent:
             return
 
         try:
-            with open(source_file, 'r', encoding='utf-8') as f:
+            with open(source_file, encoding="utf-8") as f:
                 content = f.read()
         except Exception:
             return
@@ -391,19 +396,19 @@ class RefactorAgent:
 
         # Use AST visitor to properly modify subprocess calls
         class SubprocessHardener(ast.NodeTransformer):
-            def __init__(self, lines_to_fix: Set[int]):
+            def __init__(self, lines_to_fix: set[int]):
                 self.lines_to_fix = lines_to_fix
                 self.modified = False
 
             def visit_Call(self, node):
                 # Check if this call is on a line we need to fix
-                if not hasattr(node, 'lineno') or node.lineno not in self.lines_to_fix:
+                if not hasattr(node, "lineno") or node.lineno not in self.lines_to_fix:
                     return node
 
                 # Check if it's a subprocess call
                 is_subprocess = False
                 if isinstance(node.func, ast.Attribute):
-                    if isinstance(node.func.value, ast.Name) and node.func.value.id == 'subprocess':
+                    if isinstance(node.func.value, ast.Name) and node.func.value.id == "subprocess":
                         is_subprocess = True
 
                 if not is_subprocess:
@@ -413,17 +418,17 @@ class RefactorAgent:
                 new_keywords = []
                 has_check = False
                 for kw in node.keywords:
-                    if kw.arg == 'shell':
+                    if kw.arg == "shell":
                         # Skip shell=True
                         self.modified = True
                         continue
-                    if kw.arg == 'check':
+                    if kw.arg == "check":
                         has_check = True
                     new_keywords.append(kw)
 
                 # Add check=False if not present
                 if not has_check:
-                    new_keywords.append(ast.keyword(arg='check', value=ast.Constant(value=False)))
+                    new_keywords.append(ast.keyword(arg="check", value=ast.Constant(value=False)))
                     self.modified = True
 
                 node.keywords = new_keywords
@@ -441,9 +446,11 @@ class RefactorAgent:
                 # If unparsing fails, fall back to regex
                 self._harden_subprocess_regex_fallback(file_path, lines_to_fix, content)
 
-    def _harden_subprocess_regex_fallback(self, file_path: str, lines_to_fix: Set[int], content: str):
+    def _harden_subprocess_regex_fallback(
+        self, file_path: str, lines_to_fix: set[int], content: str
+    ):
         """Fallback regex-based subprocess hardening with improved comma handling"""
-        lines = content.split('\n')
+        lines = content.split("\n")
         modified = False
         modified_lines = lines[:]
 
@@ -457,29 +464,29 @@ class RefactorAgent:
                 new_line = line
 
                 # Remove , shell=True, -> ,
-                new_line = re.sub(r',\s*shell\s*=\s*True\s*,', ',', new_line)
+                new_line = re.sub(r",\s*shell\s*=\s*True\s*,", ",", new_line)
                 # Remove , shell=True) -> )
-                new_line = re.sub(r',\s*shell\s*=\s*True\s*\)', ')', new_line)
+                new_line = re.sub(r",\s*shell\s*=\s*True\s*\)", ")", new_line)
                 # Remove (shell=True, -> (
-                new_line = re.sub(r'\(\s*shell\s*=\s*True\s*,', '(', new_line)
+                new_line = re.sub(r"\(\s*shell\s*=\s*True\s*,", "(", new_line)
                 # Remove (shell=True) -> ()
-                new_line = re.sub(r'\(\s*shell\s*=\s*True\s*\)', '()', new_line)
+                new_line = re.sub(r"\(\s*shell\s*=\s*True\s*\)", "()", new_line)
 
                 # Add check=False if not present and if there's a subprocess call
-                if 'check=' not in new_line and 'subprocess.' in new_line:
+                if "check=" not in new_line and "subprocess." in new_line:
                     # Add check=False before the closing paren
-                    new_line = re.sub(r'\)(\s*)$', r', check=False)\1', new_line)
+                    new_line = re.sub(r"\)(\s*)$", r", check=False)\1", new_line)
 
                 if new_line != line:
                     modified_lines[idx] = new_line
                     modified = True
 
         if modified:
-            modified_content = '\n'.join(modified_lines)
+            modified_content = "\n".join(modified_lines)
             self.modifications[file_path] = modified_content
             self.notes.append(f"Hardened subprocess calls in {file_path}")
 
-    def _find_constant_at_line(self, tree: ast.AST, line_num: int) -> Optional[Dict[str, Any]]:
+    def _find_constant_at_line(self, tree: ast.AST, line_num: int) -> dict[str, Any] | None:
         """Find the constant definition at the specified line"""
         for node in ast.walk(tree):
             if isinstance(node, ast.Module):
@@ -500,21 +507,17 @@ class RefactorAgent:
                             # Get target name
                             for target in item.targets:
                                 if isinstance(target, ast.Name):
-                                    return {
-                                        'name': target.id,
-                                        'value': value,
-                                        'line': line_num
-                                    }
+                                    return {"name": target.id, "value": value, "line": line_num}
         return None
 
     def _inline_constant(
         self,
         content: str,
-        lines: List[str],
+        lines: list[str],
         tree: ast.AST,
         const_name: str,
         const_value: Any,
-        def_line: int
+        def_line: int,
     ) -> str:
         """
         Inline a constant by replacing usages with literal value.
@@ -527,17 +530,19 @@ class RefactorAgent:
             if isinstance(node, ast.Name) and node.id == const_name:
                 # Skip the definition line
                 if node.lineno != def_line:
-                    references.append({
-                        'line': node.lineno,
-                        'col': node.col_offset,
-                        'end_col': node.end_col_offset
-                    })
+                    references.append(
+                        {
+                            "line": node.lineno,
+                            "col": node.col_offset,
+                            "end_col": node.end_col_offset,
+                        }
+                    )
 
         if not references:
             return content
 
         # Sort references in reverse order (bottom to top) to preserve line numbers
-        references.sort(key=lambda x: (x['line'], x['col']), reverse=True)
+        references.sort(key=lambda x: (x["line"], x["col"]), reverse=True)
 
         # Convert content to list of lines for easier manipulation
         modified_lines = lines[:]
@@ -550,16 +555,16 @@ class RefactorAgent:
 
         # Replace each reference
         for ref in references:
-            line_idx = ref['line'] - 1
+            line_idx = ref["line"] - 1
             if line_idx >= len(modified_lines):
                 continue
 
             line = modified_lines[line_idx]
-            col_start = ref['col']
-            col_end = ref['end_col'] if ref['end_col'] else col_start + len(const_name)
+            col_start = ref["col"]
+            col_end = ref["end_col"] if ref["end_col"] else col_start + len(const_name)
 
             # Replace the constant name with its literal value
             new_line = line[:col_start] + literal + line[col_end:]
             modified_lines[line_idx] = new_line
 
-        return '\n'.join(modified_lines)
+        return "\n".join(modified_lines)

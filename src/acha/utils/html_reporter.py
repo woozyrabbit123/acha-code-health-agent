@@ -1,9 +1,9 @@
 """Self-contained HTML report generator for ACHA"""
-from pathlib import Path
-from typing import Dict, List, Any, Optional
-from datetime import datetime
+
 import html
-import json
+from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 
 class HTMLReporter:
@@ -15,10 +15,10 @@ class HTMLReporter:
 
     def generate(
         self,
-        analysis: Optional[Dict] = None,
-        patch: Optional[Dict] = None,
-        validation: Optional[Dict] = None,
-        target_path: str = "."
+        analysis: dict | None = None,
+        patch: dict | None = None,
+        validation: dict | None = None,
+        target_path: str = ".",
     ) -> str:
         """
         Generate self-contained HTML report.
@@ -474,7 +474,7 @@ class HTMLReporter:
         }
 """
 
-    def _build_summary_cards(self, analysis: Dict, patch: Dict, validation: Dict) -> str:
+    def _build_summary_cards(self, analysis: dict, patch: dict, validation: dict) -> str:
         """Build summary cards section"""
         findings = analysis.get("findings", [])
         total_findings = len(findings)
@@ -529,7 +529,7 @@ class HTMLReporter:
         </div>
 """
 
-    def _build_findings_section(self, findings: List[Dict]) -> str:
+    def _build_findings_section(self, findings: list[dict]) -> str:
         """Build findings table section"""
         if not findings:
             return """
@@ -551,7 +551,8 @@ class HTMLReporter:
             rule = html.escape(finding.get("finding") or finding.get("rule", "unknown"))
             rationale = html.escape(finding.get("rationale") or finding.get("message", ""))
 
-            rows.append(f"""
+            rows.append(
+                f"""
                 <tr>
                     <td data-severity="{severity_str}">{i+1}</td>
                     <td data-severity="{severity_str}">
@@ -562,7 +563,8 @@ class HTMLReporter:
                     <td data-rule="{rule}">{rule}</td>
                     <td>{rationale}</td>
                 </tr>
-            """)
+            """
+            )
 
         return f"""
         <div class="section">
@@ -603,7 +605,7 @@ class HTMLReporter:
         </div>
 """
 
-    def _build_patch_section(self, patch: Dict) -> str:
+    def _build_patch_section(self, patch: dict) -> str:
         """Build patch/refactoring section"""
         if not patch or not patch.get("files_touched"):
             return ""
@@ -633,7 +635,7 @@ class HTMLReporter:
         </div>
 """
 
-    def _build_validation_section(self, validation: Dict) -> str:
+    def _build_validation_section(self, validation: dict) -> str:
         """Build validation/test results section"""
         if not validation or validation.get("status") == "unknown":
             return ""
@@ -685,16 +687,16 @@ class HTMLReporter:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(output_path, 'w', encoding='utf-8') as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             f.write(html_content)
 
     def generate_and_write(
         self,
         output_path: Path,
-        analysis: Optional[Dict] = None,
-        patch: Optional[Dict] = None,
-        validation: Optional[Dict] = None,
-        target_path: str = "."
+        analysis: dict | None = None,
+        patch: dict | None = None,
+        validation: dict | None = None,
+        target_path: str = ".",
     ):
         """Generate and write HTML report"""
         html_content = self.generate(analysis, patch, validation, target_path)
