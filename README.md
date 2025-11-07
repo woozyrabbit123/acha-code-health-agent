@@ -1,5 +1,13 @@
-# acha-code-health-agent
-Autonomous Code-Health Agent (ACHA) — an AI tool that analyzes, refactors, validates, and exports verified code-repair reports.
+# ACHA - Autonomous Code-Health Agent
+
+[![CI](https://github.com/woozyrabbit123/acha-code-health-agent/workflows/CI/badge.svg)](https://github.com/woozyrabbit123/acha-code-health-agent/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/woozyrabbit123/acha-code-health-agent/branch/main/graph/badge.svg)](https://codecov.io/gh/woozyrabbit123/acha-code-health-agent)
+[![PyPI version](https://badge.fury.io/py/acha-code-health.svg)](https://badge.fury.io/py/acha-code-health)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
+Autonomous Code-Health Agent (ACHA) — an AI-powered tool that analyzes, refactors, validates, and exports verified code-repair reports.
 
 ## Quickstart
 
