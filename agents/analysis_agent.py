@@ -2,6 +2,8 @@
 import ast
 from pathlib import Path
 from typing import Dict, List, Any, Tuple, Set, Optional
+from utils.ast_cache import ASTCache
+from utils.parallel_executor import ParallelExecutor
 
 
 # Severity mapping for rules
@@ -164,16 +166,23 @@ def _read_lines(p: Path) -> List[str]:
 class AnalysisAgent:
     """Agent for analyzing code quality"""
 
-    def __init__(self, dup_threshold: int = 3):
+    def __init__(self, dup_threshold: int = 3, cache: Optional[ASTCache] = None,
+                 parallel: bool = False, max_workers: int = 4):
         """
         Initialize the analysis agent.
 
         Args:
             dup_threshold: Minimum references to flag a duplicated constant (default: 3)
+            cache: AST cache for improved performance (default: None)
+            parallel: Enable parallel file analysis (default: False)
+            max_workers: Number of worker threads for parallel analysis (default: 4)
         """
         self.dup_threshold = dup_threshold
         self.findings = []
         self.finding_counter = 0
+        self.cache = cache
+        self.parallel = parallel
+        self.max_workers = max_workers
 
     def _generate_finding_id(self) -> str:
         """Generate a unique finding ID"""
@@ -242,10 +251,88 @@ class AnalysisAgent:
         # Find all Python files
         python_files = list(target_path.rglob("*.py"))
 
-        for py_file in python_files:
-            self._analyze_file(py_file, target_path)
+        if self.parallel and len(python_files) > 1:
+            # Use parallel analysis
+            self._analyze_parallel(python_files, target_path)
+        else:
+            # Sequential analysis
+            for py_file in python_files:
+                self._analyze_file(py_file, target_path)
 
         return {"findings": self.findings}
+
+    def analyze_batch(self, target_dirs: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Analyze multiple directories in batch.
+
+        Args:
+            target_dirs: List of directory paths
+
+        Returns:
+            Dictionary mapping target directory to its findings
+        """
+        results = {}
+
+        for target_dir in target_dirs:
+            # Reset findings for each directory
+            self.findings = []
+            self.finding_counter = 0
+
+            target_path = Path(target_dir)
+            if not target_path.exists():
+                results[target_dir] = []
+                continue
+
+            python_files = list(target_path.rglob("*.py"))
+
+            if self.parallel and len(python_files) > 1:
+                self._analyze_parallel(python_files, target_path)
+            else:
+                for py_file in python_files:
+                    self._analyze_file(py_file, target_path)
+
+            results[target_dir] = self.findings
+
+        return results
+
+    def _analyze_parallel(self, python_files: List[Path], base_path: Path):
+        """Analyze files in parallel"""
+        executor = ParallelExecutor(max_workers=self.max_workers, verbose=False)
+
+        def analyze_single(py_file: Path) -> List[Dict]:
+            # Create a temporary findings list for this file
+            original_findings = self.findings
+            original_counter = self.finding_counter
+
+            self.findings = []
+
+            self._analyze_file(py_file, base_path)
+
+            # Capture findings from this file
+            file_findings = self.findings
+
+            # Restore original state
+            self.findings = original_findings
+            self.finding_counter = original_counter
+
+            return file_findings
+
+        # Analyze files in parallel
+        all_file_findings = executor.map_parallel(analyze_single, python_files)
+
+        # Combine findings
+        for file_findings in all_file_findings:
+            if file_findings:
+                self.findings.extend(file_findings)
+                # Update counter based on findings added
+                for finding in file_findings:
+                    if 'id' in finding:
+                        # Extract counter from id like "ANL-001"
+                        try:
+                            counter = int(finding['id'].split('-')[1])
+                            self.finding_counter = max(self.finding_counter, counter)
+                        except Exception:
+                            pass
 
     def _analyze_file(self, file_path: Path, base_path: Path):
         """Analyze a single Python file"""
@@ -257,11 +344,27 @@ class AnalysisAgent:
             # Skip files that can't be read
             return
 
-        try:
-            tree = ast.parse(content, filename=str(file_path))
-        except SyntaxError:
-            # Skip files with syntax errors
-            return
+        # Try to get AST from cache
+        tree = None
+        if self.cache:
+            tree = self.cache.get_ast(file_path)
+
+        # Parse if not in cache
+        if tree is None:
+            try:
+                tree = ast.parse(content, filename=str(file_path))
+                # Store in cache for future use
+                if self.cache:
+                    self.cache.put_ast(file_path, tree)
+            except SyntaxError:
+                # Skip files with syntax errors
+                return
+        else:
+            # Got from cache, but still need to parse for line content
+            try:
+                tree = ast.parse(content, filename=str(file_path))
+            except SyntaxError:
+                return
 
         relative_path = str(file_path.relative_to(base_path))
 

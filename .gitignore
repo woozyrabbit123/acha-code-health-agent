@@ -209,6 +209,7 @@ __marimo__/
 # ACHA working directories and generated files
 workdir/
 .checkpoints/
+.acha_cache/
 reports/test_output.txt
 reports/report.md
 dist/release.zip
