@@ -28,6 +28,13 @@
         "type": "string"
       },
       "description": "Additional notes about the patch"
+    },
+    "refactor_types_applied": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "List of refactor types applied in this patch"
     }
   },
   "required": ["patch_id", "files_touched", "lines_added", "lines_removed", "notes"]

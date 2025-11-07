@@ -67,8 +67,14 @@ def refactor(args):
     print(f"Refactoring code in: {target_dir}")
     print(f"Using analysis from: {analysis_path}")
 
+    # Parse refactor types
+    refactor_types = None
+    if hasattr(args, 'refactor_types') and args.refactor_types:
+        refactor_types = [rt.strip() for rt in args.refactor_types.split(',')]
+        print(f"Refactor types: {', '.join(refactor_types)}")
+
     # Run refactoring
-    agent = RefactorAgent()
+    agent = RefactorAgent(refactor_types=refactor_types)
     try:
         patch_summary = agent.apply(target_dir, analysis_path)
     except Exception as e:
@@ -203,6 +209,13 @@ def run_pipeline_command(args, policy=None):
     fail_on_risky = args.fail_on_risky
     timeout = args.timeout
 
+    # Parse refactor types
+    refactor_types = None
+    if hasattr(args, 'refactor_types') and args.refactor_types:
+        refactor_types = [rt.strip() for rt in args.refactor_types.split(',')]
+    elif hasattr(args, 'aggressive') and args.aggressive:
+        refactor_types = ["inline_const", "remove_unused_import", "organize_imports", "harden_subprocess"]
+
     log_event("pipeline_start", {"target": str(target_dir)})
 
     # Ensure reports directory exists
@@ -231,6 +244,8 @@ def run_pipeline_command(args, policy=None):
     log(f"No refactor: {no_refactor}")
     log(f"Fail on risky: {fail_on_risky}")
     log(f"Timeout: {timeout}s")
+    if refactor_types:
+        log(f"Refactor types: {', '.join(refactor_types)}")
     log("")
 
     # Step 1: ANALYZE
@@ -330,6 +345,10 @@ def run_pipeline_command(args, policy=None):
         refactor_args = Args()
         refactor_args.target = target_dir
         refactor_args.analysis = str(analysis_path)
+        if refactor_types:
+            refactor_args.refactor_types = ','.join(refactor_types)
+        else:
+            refactor_args.refactor_types = None
 
         result = refactor(refactor_args)
         if result != 0:
@@ -423,6 +442,7 @@ def main():
     parser_refactor = subparsers.add_parser('refactor', help='Refactor code')
     parser_refactor.add_argument('--target', required=True, help='Target directory to refactor')
     parser_refactor.add_argument('--analysis', required=True, help='Path to analysis.json file')
+    parser_refactor.add_argument('--refactor-types', help='Comma-separated list of refactor types (default: inline_const,remove_unused_import)')
     parser_refactor.set_defaults(func=refactor)
 
     # validate subcommand
@@ -440,6 +460,8 @@ def main():
     parser_run.add_argument('--no-refactor', action='store_true', help='Skip refactoring step')
     parser_run.add_argument('--fail-on-risky', action='store_true', help='Fail if risky constructs found')
     parser_run.add_argument('--timeout', type=int, default=30, help='Test timeout in seconds (default: 30)')
+    parser_run.add_argument('--refactor-types', help='Comma-separated list of refactor types')
+    parser_run.add_argument('--aggressive', action='store_true', help='Enable all refactor types')
     parser_run.set_defaults(func=run_pipeline_command)
 
     args = parser.parse_args()
