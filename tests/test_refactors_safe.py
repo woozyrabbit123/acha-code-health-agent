@@ -4,7 +4,7 @@ import shutil
 import tempfile
 import textwrap
 from pathlib import Path
-from acha.agents.refactor_agent import RefactorAgent, RefactorType
+from acha.agents.refactor_agent import RefactorAgent
 from acha.agents.analysis_agent import AnalysisAgent
 
 
@@ -35,7 +35,7 @@ def main():
 
         # Save analysis
         analysis_path = tmpdir / "analysis.json"
-        with open(analysis_path, 'w') as f:
+        with open(analysis_path, 'w', encoding='utf-8') as f:
             json.dump(result, f)
 
         # Run refactor with remove_unused_import
@@ -75,7 +75,7 @@ def main():
 
         # Create dummy analysis
         analysis_path = tmpdir / "analysis.json"
-        with open(analysis_path, 'w') as f:
+        with open(analysis_path, 'w', encoding='utf-8') as f:
             json.dump({"findings": []}, f)
 
         # Run refactor with organize_imports
@@ -120,7 +120,7 @@ def run_command():
 
         # Save analysis
         analysis_path = tmpdir / "analysis.json"
-        with open(analysis_path, 'w') as f:
+        with open(analysis_path, 'w', encoding='utf-8') as f:
             json.dump(result, f)
 
         # Run refactor with harden_subprocess
@@ -177,7 +177,7 @@ def func5():
 
         # Save analysis
         analysis_path = tmpdir / "analysis.json"
-        with open(analysis_path, 'w') as f:
+        with open(analysis_path, 'w', encoding='utf-8') as f:
             json.dump(result, f)
 
         # Run refactor with multiple types
@@ -234,7 +234,7 @@ def test_version():
 
         # Save analysis
         analysis_path = tmpdir / "analysis.json"
-        with open(analysis_path, 'w') as f:
+        with open(analysis_path, 'w', encoding='utf-8') as f:
             json.dump(result, f)
 
         # Run refactor

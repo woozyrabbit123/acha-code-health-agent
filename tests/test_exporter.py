@@ -37,7 +37,7 @@ def test_build_proof_pack_with_all_files():
                 }
             ]
         }
-        with open(reports_dir / "analysis.json", 'w') as f:
+        with open(reports_dir / "analysis.json", 'w', encoding='utf-8') as f:
             json.dump(analysis_data, f)
 
         patch_summary_data = {
@@ -47,7 +47,7 @@ def test_build_proof_pack_with_all_files():
             "lines_removed": 3,
             "notes": ["Test note"]
         }
-        with open(reports_dir / "patch_summary.json", 'w') as f:
+        with open(reports_dir / "patch_summary.json", 'w', encoding='utf-8') as f:
             json.dump(patch_summary_data, f)
 
         validate_data = {
@@ -58,14 +58,14 @@ def test_build_proof_pack_with_all_files():
             "failing_tests": [],
             "validate_dir": "./test"
         }
-        with open(reports_dir / "validate.json", 'w') as f:
+        with open(reports_dir / "validate.json", 'w', encoding='utf-8') as f:
             json.dump(validate_data, f)
 
         # Create optional files
-        with open(reports_dir / "test_output.txt", 'w') as f:
+        with open(reports_dir / "test_output.txt", 'w', encoding='utf-8', newline='\n') as f:
             f.write("Test output content")
 
-        with open(dist_dir / "patch.diff", 'w') as f:
+        with open(dist_dir / "patch.diff", 'w', encoding='utf-8', newline='\n') as f:
             f.write("--- a/test.py\n+++ b/test.py\n")
 
         # Build proof pack
@@ -129,7 +129,7 @@ def test_build_proof_pack_without_optional_files():
 
         # Create only required JSON files
         analysis_data = {"findings": []}
-        with open(reports_dir / "analysis.json", 'w') as f:
+        with open(reports_dir / "analysis.json", 'w', encoding='utf-8') as f:
             json.dump(analysis_data, f)
 
         patch_summary_data = {
@@ -139,7 +139,7 @@ def test_build_proof_pack_without_optional_files():
             "lines_removed": 0,
             "notes": []
         }
-        with open(reports_dir / "patch_summary.json", 'w') as f:
+        with open(reports_dir / "patch_summary.json", 'w', encoding='utf-8') as f:
             json.dump(patch_summary_data, f)
 
         validate_data = {
@@ -150,7 +150,7 @@ def test_build_proof_pack_without_optional_files():
             "failing_tests": ["test_foo"],
             "validate_dir": "./test"
         }
-        with open(reports_dir / "validate.json", 'w') as f:
+        with open(reports_dir / "validate.json", 'w', encoding='utf-8') as f:
             json.dump(validate_data, f)
 
         # Build proof pack (no optional files)
@@ -198,7 +198,7 @@ def test_build_proof_pack_missing_required_file():
             "lines_removed": 0,
             "notes": []
         }
-        with open(reports_dir / "patch_summary.json", 'w') as f:
+        with open(reports_dir / "patch_summary.json", 'w', encoding='utf-8') as f:
             json.dump(patch_summary_data, f)
 
         # Should raise FileNotFoundError
@@ -223,7 +223,7 @@ def test_build_proof_pack_invalid_json():
 
         # Create invalid analysis.json (missing required field)
         invalid_analysis = {"findings": [{"id": "x"}]}  # missing required fields
-        with open(reports_dir / "analysis.json", 'w') as f:
+        with open(reports_dir / "analysis.json", 'w', encoding='utf-8') as f:
             json.dump(invalid_analysis, f)
 
         patch_summary_data = {
@@ -233,7 +233,7 @@ def test_build_proof_pack_invalid_json():
             "lines_removed": 0,
             "notes": []
         }
-        with open(reports_dir / "patch_summary.json", 'w') as f:
+        with open(reports_dir / "patch_summary.json", 'w', encoding='utf-8') as f:
             json.dump(patch_summary_data, f)
 
         validate_data = {
@@ -244,7 +244,7 @@ def test_build_proof_pack_invalid_json():
             "failing_tests": [],
             "validate_dir": "."
         }
-        with open(reports_dir / "validate.json", 'w') as f:
+        with open(reports_dir / "validate.json", 'w', encoding='utf-8') as f:
             json.dump(validate_data, f)
 
         # Should raise ValidationError
@@ -305,7 +305,7 @@ def test_report_md_generation():
                 }
             ]
         }
-        with open(reports_dir / "analysis.json", 'w') as f:
+        with open(reports_dir / "analysis.json", 'w', encoding='utf-8') as f:
             json.dump(analysis_data, f)
 
         patch_summary_data = {
@@ -315,7 +315,7 @@ def test_report_md_generation():
             "lines_removed": 13,
             "notes": []
         }
-        with open(reports_dir / "patch_summary.json", 'w') as f:
+        with open(reports_dir / "patch_summary.json", 'w', encoding='utf-8') as f:
             json.dump(patch_summary_data, f)
 
         validate_data = {
@@ -326,7 +326,7 @@ def test_report_md_generation():
             "failing_tests": [],
             "validate_dir": "."
         }
-        with open(reports_dir / "validate.json", 'w') as f:
+        with open(reports_dir / "validate.json", 'w', encoding='utf-8') as f:
             json.dump(validate_data, f)
 
         # Build proof pack

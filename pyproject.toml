@@ -63,6 +63,7 @@ include = ["acha*"]
 [tool.setuptools.package-data]
 acha = [
     "schemas/*.json",
+    "templates/*.html",
 ]
 
 [tool.pytest.ini_options]

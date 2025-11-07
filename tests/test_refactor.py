@@ -54,7 +54,7 @@ def log_key():
 
         # Save analysis to temp file
         analysis_file = tmpdir_path / "analysis.json"
-        with open(analysis_file, 'w') as f:
+        with open(analysis_file, 'w', encoding='utf-8') as f:
             json.dump(analysis_result, f)
 
         # Run refactoring
@@ -126,7 +126,7 @@ def hello():
 
         # Create empty analysis
         analysis_file = tmpdir_path / "analysis.json"
-        with open(analysis_file, 'w') as f:
+        with open(analysis_file, 'w', encoding='utf-8') as f:
             json.dump({"findings": []}, f)
 
         # Run refactoring
@@ -187,7 +187,7 @@ def check_size(value):
 
         # Save analysis
         analysis_file = tmpdir_path / "analysis.json"
-        with open(analysis_file, 'w') as f:
+        with open(analysis_file, 'w', encoding='utf-8') as f:
             json.dump(analysis_result, f)
 
         # Run refactoring

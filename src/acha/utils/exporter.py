@@ -123,8 +123,10 @@ def _load_and_validate_json(json_path: Path, schema_name: str) -> Dict[str, Any]
         schema_path = schema_files.joinpath(schema_name)
         with schema_path.open("r", encoding="utf-8") as f:
             schema = json.load(f)
-    except Exception as e:
+    except FileNotFoundError as e:
         raise FileNotFoundError(f"Schema file not found: {schema_name}") from e
+    except OSError as e:
+        raise OSError(f"IO error accessing schema {schema_name}") from e
 
     validate(instance=data, schema=schema)
     return data

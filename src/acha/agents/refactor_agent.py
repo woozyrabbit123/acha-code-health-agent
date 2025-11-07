@@ -7,7 +7,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Set
 from acha.utils.patcher import Patcher
-from acha.utils.import_analyzer import classify_import, get_unused_imports, collect_import_usage
+from acha.utils.import_analyzer import classify_import
 
 
 class RefactorType(Enum):
