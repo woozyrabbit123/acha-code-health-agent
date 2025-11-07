@@ -6,11 +6,11 @@ def run_cmd(args, cwd: Path):
 
 def test_run_fails_under_strict(tmp_path):
     # run against sample_project to trigger risky detection
-    cmd = [sys.executable, "cli.py", "--policy", "strict-policy.json", "--session-log", "reports/session.jsonl", "run", "--target", "./sample_project"]
+    cmd = [sys.executable, "-m", "acha.cli", "--policy", "strict-policy.json", "--session-log", "reports/session.jsonl", "run", "--target", "./sample_project"]
     res = run_cmd(cmd, Path.cwd())
     assert res.returncode != 0, res.stdout + res.stderr
 
 def test_run_passes_under_dev(tmp_path):
-    cmd = [sys.executable, "cli.py", "--policy", "dev-policy.json", "--session-log", "reports/session.jsonl", "run", "--target", "./sample_project"]
+    cmd = [sys.executable, "-m", "acha.cli", "--policy", "dev-policy.json", "--session-log", "reports/session.jsonl", "run", "--target", "./sample_project"]
     res = run_cmd(cmd, Path.cwd())
     assert res.returncode == 0, res.stdout + res.stderr

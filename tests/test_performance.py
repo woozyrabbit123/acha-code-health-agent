@@ -3,8 +3,8 @@ import time
 import tempfile
 import shutil
 from pathlib import Path
-from agents.analysis_agent import AnalysisAgent
-from utils.ast_cache import ASTCache
+from acha.agents.analysis_agent import AnalysisAgent
+from acha.utils.ast_cache import ASTCache
 import textwrap
 
 

@@ -7,16 +7,16 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from agents.analysis_agent import AnalysisAgent
-from agents.refactor_agent import RefactorAgent
-from agents.validation_agent import ValidationAgent
-from utils.checkpoint import checkpoint, restore
-from utils.exporter import build_proof_pack
-from utils.logger import init_session_logger, log_event, close_session_logger
-from utils.policy import PolicyConfig, PolicyEnforcer
-from utils.ast_cache import ASTCache
-from utils.sarif_reporter import SARIFReporter
-from utils.html_reporter import HTMLReporter
+from acha.agents.analysis_agent import AnalysisAgent
+from acha.agents.refactor_agent import RefactorAgent
+from acha.agents.validation_agent import ValidationAgent
+from acha.utils.checkpoint import checkpoint, restore
+from acha.utils.exporter import build_proof_pack
+from acha.utils.logger import init_session_logger, log_event, close_session_logger
+from acha.utils.policy import PolicyConfig, PolicyEnforcer
+from acha.utils.ast_cache import ASTCache
+from acha.utils.sarif_reporter import SARIFReporter
+from acha.utils.html_reporter import HTMLReporter
 import os
 
 

@@ -9,19 +9,19 @@ def test_package_imports():
     """Test that all main modules are importable."""
     # Test core modules
     modules_to_test = [
-        "agents.analysis_agent",
-        "agents.refactor_agent",
-        "agents.validation_agent",
-        "utils.policy",
-        "utils.logger",
-        "utils.checkpoint",
-        "utils.exporter",
-        "utils.patcher",
-        "utils.ast_cache",
-        "utils.parallel_executor",
-        "utils.sarif_reporter",
-        "utils.html_reporter",
-        "utils.import_analyzer",
+        "acha.agents.analysis_agent",
+        "acha.agents.refactor_agent",
+        "acha.agents.validation_agent",
+        "acha.utils.policy",
+        "acha.utils.logger",
+        "acha.utils.checkpoint",
+        "acha.utils.exporter",
+        "acha.utils.patcher",
+        "acha.utils.ast_cache",
+        "acha.utils.parallel_executor",
+        "acha.utils.sarif_reporter",
+        "acha.utils.html_reporter",
+        "acha.utils.import_analyzer",
     ]
 
     for module_name in modules_to_test:
@@ -34,7 +34,7 @@ def test_package_imports():
 def test_cli_module_exists():
     """Test that CLI module exists and has main function."""
     try:
-        import cli
+        import acha.cli as cli
         assert hasattr(cli, "main"), "CLI module should have main() function"
     except ImportError as e:
         assert False, f"Failed to import cli module: {e}"
@@ -88,14 +88,19 @@ def test_required_files_exist():
 
 
 def test_schemas_directory_exists():
-    """Test that schemas directory exists with JSON files."""
-    schemas_dir = Path("schemas")
-    assert schemas_dir.exists(), "schemas/ directory should exist"
-    assert schemas_dir.is_dir(), "schemas/ should be a directory"
+    """Test that schemas directory exists in package and contains schema files"""
+    try:
+        from importlib import resources
+    except ImportError:
+        import importlib_resources as resources
 
-    # Check for schema files
-    schema_files = list(schemas_dir.glob("*.json"))
-    assert len(schema_files) > 0, "schemas/ should contain JSON schema files"
+    # Check that schemas are accessible from the package
+    schema_files = resources.files("acha.schemas")
+
+    # Verify we can list schema files
+    schema_list = list(schema_files.iterdir())
+    json_schemas = [s for s in schema_list if s.name.endswith('.json')]
+    assert len(json_schemas) > 0, "acha.schemas should contain JSON schema files"
 
 
 def test_github_workflows_exist():
@@ -156,18 +161,32 @@ def test_python_version_requirement():
 
 
 def test_package_structure():
-    """Test that package structure is correct."""
-    required_dirs = [
+    """Test that package structure is correct with src-layout."""
+    # Check for src-layout structure
+    src_dir = Path("src")
+    assert src_dir.exists(), "src/ directory should exist"
+    assert src_dir.is_dir(), "src/ should be a directory"
+
+    acha_dir = src_dir / "acha"
+    assert acha_dir.exists(), "src/acha/ directory should exist"
+    assert acha_dir.is_dir(), "src/acha/ should be a directory"
+
+    # Check for package subdirectories
+    required_package_dirs = [
         "agents",
         "utils",
         "schemas",
-        "tests",
     ]
 
-    for dir_name in required_dirs:
-        dir_path = Path(dir_name)
-        assert dir_path.exists(), f"Required directory {dir_name} should exist"
-        assert dir_path.is_dir(), f"{dir_name} should be a directory"
+    for dir_name in required_package_dirs:
+        dir_path = acha_dir / dir_name
+        assert dir_path.exists(), f"src/acha/{dir_name} should exist"
+        assert dir_path.is_dir(), f"src/acha/{dir_name} should be a directory"
+
+    # Check that tests directory is at root level (not in package)
+    tests_dir = Path("tests")
+    assert tests_dir.exists(), "tests/ directory should exist"
+    assert tests_dir.is_dir(), "tests/ should be a directory"
 
 
 def test_sample_project_exists():

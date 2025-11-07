@@ -5,8 +5,13 @@ from pathlib import Path
 import pytest
 from jsonschema import validate as json_validate, ValidationError
 
-from agents.validation_agent import ValidationAgent
-from utils.checkpoint import checkpoint, restore
+try:
+    from importlib import resources
+except ImportError:
+    import importlib_resources as resources
+
+from acha.agents.validation_agent import ValidationAgent
+from acha.utils.checkpoint import checkpoint, restore
 
 
 def test_validation_agent_passing_tests():
@@ -39,8 +44,9 @@ def test_string():
         assert 'failing_tests' in result
 
         # Validate against schema
-        schema_path = Path("schemas/validate.schema.json")
-        with open(schema_path) as f:
+        schema_files = resources.files("acha.schemas")
+        schema_path = schema_files.joinpath("validate.schema.json")
+        with schema_path.open("r", encoding="utf-8") as f:
             schema = json.load(f)
 
         try:
@@ -56,7 +62,8 @@ def test_string():
 
         # Verify result includes validate_dir
         assert 'validate_dir' in result, "Result should include validate_dir"
-        assert result['validate_dir'] == str(tmpdir_path), "validate_dir should match input directory"
+        import os
+        assert os.path.normpath(result['validate_dir']) == os.path.normpath(str(tmpdir_path)), "validate_dir should match input directory"
 
 
 def test_validation_agent_failing_tests():
@@ -125,7 +132,8 @@ def multiply(a, b):
 
         # Verify result includes validate_dir
         assert 'validate_dir' in result, "Result should include validate_dir"
-        assert result['validate_dir'] == str(tmpdir_path), "validate_dir should match input directory"
+        import os
+        assert os.path.normpath(result['validate_dir']) == os.path.normpath(str(tmpdir_path)), "validate_dir should match input directory"
 
         # Restore from checkpoint to the SAME directory
         restore(str(checkpoint_path), str(tmpdir_path))
@@ -147,11 +155,14 @@ def multiply(a, b):
 
 def test_validation_schema_valid():
     """Test that validate.schema.json is valid"""
-    schema_path = Path("schemas/validate.schema.json")
-    assert schema_path.exists(), "Schema file should exist"
-
-    with open(schema_path) as f:
-        schema = json.load(f)
+    schema_files = resources.files("acha.schemas")
+    schema_path = schema_files.joinpath("validate.schema.json")
+    # Test that we can access the schema
+    try:
+        with schema_path.open("r", encoding="utf-8") as f:
+            schema = json.load(f)
+    except FileNotFoundError:
+        assert False, "Schema file should exist"
 
     # Validate schema structure
     assert schema['$schema'] == "http://json-schema.org/draft-07/schema#"

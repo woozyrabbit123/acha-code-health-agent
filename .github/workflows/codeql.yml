@@ -63,7 +63,7 @@ jobs:
 
       - name: Run ACHA analysis
         run: |
-          python cli.py analyze --target . --output-format sarif
+          acha analyze --target . --output-format sarif
 
       - name: Upload SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v3

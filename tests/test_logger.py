@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from utils.logger import JSONLLogger
+from acha.utils.logger import JSONLLogger
 
 def test_jsonl_append(tmp_path: Path):
     p = tmp_path / "test.jsonl"

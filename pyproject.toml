@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -50,14 +50,20 @@ Issues = "https://github.com/woozyrabbit123/acha-code-health-agent/issues"
 Changelog = "https://github.com/woozyrabbit123/acha-code-health-agent/blob/main/CHANGELOG.md"
 
 [project.scripts]
-acha = "cli:main"
+acha = "acha.cli:main"
 
 [tool.setuptools]
-packages = ["agents", "utils", "schemas"]
+package-dir = {"" = "src"}
 include-package-data = true
 
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["acha*"]
+
 [tool.setuptools.package-data]
-schemas = ["*.json"]
+acha = [
+    "schemas/*.json",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -70,7 +76,7 @@ addopts = [
 ]
 
 [tool.coverage.run]
-source = ["agents", "utils", "cli"]
+source = ["src/acha"]
 omit = [
     "tests/*",
     "sample_project/*",
