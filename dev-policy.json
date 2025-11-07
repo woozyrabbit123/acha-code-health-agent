@@ -1,0 +1,7 @@
+{
+  "fail_on_error": false,
+  "fail_on_risky": false,
+  "max_warnings": 50,
+  "max_errors": 5,
+  "suppression_enabled": true
+}

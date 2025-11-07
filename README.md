@@ -81,3 +81,24 @@ make clean
 ```
 
 Removes all generated files and directories: `workdir/`, `.checkpoints/`, `dist/`, `reports/`.
+
+## Configuration & Policies
+
+Use JSONL session logs and policy gates to control quality:
+
+```bash
+python cli.py run --target ./sample_project --policy strict-policy.json --session-log reports/session.jsonl
+```
+
+Inline suppressions:
+
+```python
+def f():  # acha: disable=long_function
+    ...
+```
+
+Policy example:
+
+```json
+{ "fail_on_risky": true, "max_errors": 0, "max_warnings": 10 }
+```

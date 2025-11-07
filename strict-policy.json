@@ -1,0 +1,7 @@
+{
+  "fail_on_error": true,
+  "fail_on_risky": true,
+  "max_warnings": 0,
+  "max_errors": 0,
+  "suppression_enabled": false
+}
