@@ -102,3 +102,18 @@ Policy example:
 ```json
 { "fail_on_risky": true, "max_errors": 0, "max_warnings": 10 }
 ```
+
+### Analyzer Rules (v0.2)
+
+New detectors (AST-only, deterministic):
+
+- **unused_import** (warn) - Detects imports that are never used
+- **magic_number** (warn) - Repeated numeric literals without a named constant
+- **high_complexity** (warn) - Cyclomatic complexity exceeds threshold from policy.max_complexity (default 15)
+- **missing_docstring** (info) - Functions without docstrings
+- **broad_exception** (error) - Catching broad Exception or bare except
+- **broad_subprocess_shell** (error) - Flags subprocess.* with shell=True
+
+Suppressions:
+- Per-line: `# acha: disable=<rule>` or `# acha: disable-all`
+- File-wide: `# acha: file-disable=<rule>` or `# acha: file-disable-all`

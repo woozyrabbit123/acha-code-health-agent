@@ -26,7 +26,18 @@
           },
           "finding": {
             "type": "string",
-            "enum": ["dup_immutable_const", "long_function", "style_violation", "risky_construct"],
+            "enum": [
+              "dup_immutable_const",
+              "long_function",
+              "style_violation",
+              "risky_construct",
+              "unused_import",
+              "magic_number",
+              "high_complexity",
+              "missing_docstring",
+              "broad_exception",
+              "broad_subprocess_shell"
+            ],
             "description": "Type of finding detected"
           },
           "severity": {
