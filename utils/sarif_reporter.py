@@ -1,5 +1,6 @@
 """SARIF 2.1.0 report generator for ACHA findings"""
 import json
+import zlib
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
@@ -269,10 +270,12 @@ class SARIFReporter:
         return result
 
     def _get_rule_id(self, rule_type: str) -> str:
-        """Get SARIF rule ID for a rule type"""
+        """Get deterministic SARIF rule ID for a rule type"""
         if rule_type in self.RULE_DEFINITIONS:
             return self.RULE_DEFINITIONS[rule_type]["id"]
-        return f"ACHA{hash(rule_type) % 1000:03d}"
+        # Use CRC32 for deterministic hash across runs
+        rule_hash = zlib.crc32(rule_type.encode("utf-8")) % 1000
+        return f"ACHA{rule_hash:03d}"
 
     def _map_severity(self, severity: Any) -> str:
         """Map ACHA severity to SARIF level"""
