@@ -203,7 +203,7 @@ class RefactorAgent:
             self._remove_unused_imports_from_file(file_path, set(unused_lines), target_path)
 
     def _remove_unused_imports_from_file(self, file_path: str, unused_lines: Set[int], target_path: Path):
-        """Remove unused imports from a single file"""
+        """Remove unused imports from a single file, handling multi-import statements"""
         source_file = target_path / file_path
 
         if not source_file.exists():
@@ -212,11 +212,28 @@ class RefactorAgent:
         try:
             with open(source_file, 'r', encoding='utf-8') as f:
                 content = f.read()
-                lines = content.split('\n')
         except Exception:
             return
 
-        # Remove lines with unused imports
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            # If we can't parse, fall back to simple line removal
+            lines = content.split('\n')
+            modified_lines = []
+            for i, line in enumerate(lines, start=1):
+                if i not in unused_lines:
+                    modified_lines.append(line)
+            modified_content = '\n'.join(modified_lines)
+            if modified_content != content:
+                self.modifications[file_path] = modified_content
+                self.notes.append(f"Removed {len(unused_lines)} unused import(s) from {file_path}")
+            return
+
+        # For proper handling, we remove entire import lines
+        # Multi-import analysis would require tracking which specific name is unused,
+        # which is beyond the current analyzer's capability
+        lines = content.split('\n')
         modified_lines = []
         for i, line in enumerate(lines, start=1):
             if i not in unused_lines:
@@ -237,7 +254,7 @@ class RefactorAgent:
             self._organize_imports_in_file(relative_path, target_path)
 
     def _organize_imports_in_file(self, file_path: str, target_path: Path):
-        """Organize imports in a single file"""
+        """Organize imports in a single file, respecting __future__ import rules"""
         source_file = target_path / file_path
 
         if not source_file.exists():
@@ -255,30 +272,40 @@ class RefactorAgent:
             return
 
         # Find all imports at module level
+        future_imports = []
         imports = {'stdlib': [], 'third_party': [], 'local': []}
         non_import_start = 0
 
         for i, node in enumerate(tree.body):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
-                # Classify and store
-                if isinstance(node, ast.Import):
-                    module = node.names[0].name
+                # Check for __future__ imports - these MUST come first
+                if isinstance(node, ast.ImportFrom) and node.module == '__future__':
+                    future_imports.append(ast.unparse(node))
                 else:
-                    module = node.module or ''
+                    # Classify and store regular imports
+                    if isinstance(node, ast.Import):
+                        module = node.names[0].name
+                    else:
+                        module = node.module or ''
 
-                classification = classify_import(module)
-                imports[classification].append(ast.unparse(node))
+                    classification = classify_import(module)
+                    imports[classification].append(ast.unparse(node))
             else:
                 # First non-import node
                 non_import_start = i
                 break
 
         # If no imports to organize, skip
-        if not any(imports.values()):
+        if not any(imports.values()) and not future_imports:
             return
 
         # Build organized import section
         organized_imports = []
+
+        # __future__ imports MUST be first (Python requirement)
+        if future_imports:
+            organized_imports.extend(sorted(set(future_imports)))
+            organized_imports.append('')  # Blank line after __future__
 
         # Sort within each group and deduplicate
         for group in ['stdlib', 'third_party', 'local']:
@@ -343,7 +370,7 @@ class RefactorAgent:
             self._harden_subprocess_in_file(file_path, set(lines_to_fix), target_path)
 
     def _harden_subprocess_in_file(self, file_path: str, lines_to_fix: Set[int], target_path: Path):
-        """Harden subprocess calls in a single file"""
+        """Harden subprocess calls in a single file using AST manipulation"""
         source_file = target_path / file_path
 
         if not source_file.exists():
@@ -352,11 +379,71 @@ class RefactorAgent:
         try:
             with open(source_file, 'r', encoding='utf-8') as f:
                 content = f.read()
-                lines = content.split('\n')
         except Exception:
             return
 
-        # Remove shell=True from lines
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            # Fall back to regex-based approach for unparseable code
+            self._harden_subprocess_regex_fallback(file_path, lines_to_fix, content)
+            return
+
+        # Use AST visitor to properly modify subprocess calls
+        class SubprocessHardener(ast.NodeTransformer):
+            def __init__(self, lines_to_fix: Set[int]):
+                self.lines_to_fix = lines_to_fix
+                self.modified = False
+
+            def visit_Call(self, node):
+                # Check if this call is on a line we need to fix
+                if not hasattr(node, 'lineno') or node.lineno not in self.lines_to_fix:
+                    return node
+
+                # Check if it's a subprocess call
+                is_subprocess = False
+                if isinstance(node.func, ast.Attribute):
+                    if isinstance(node.func.value, ast.Name) and node.func.value.id == 'subprocess':
+                        is_subprocess = True
+
+                if not is_subprocess:
+                    return node
+
+                # Remove shell=True from keywords
+                new_keywords = []
+                has_check = False
+                for kw in node.keywords:
+                    if kw.arg == 'shell':
+                        # Skip shell=True
+                        self.modified = True
+                        continue
+                    if kw.arg == 'check':
+                        has_check = True
+                    new_keywords.append(kw)
+
+                # Add check=False if not present
+                if not has_check:
+                    new_keywords.append(ast.keyword(arg='check', value=ast.Constant(value=False)))
+                    self.modified = True
+
+                node.keywords = new_keywords
+                return node
+
+        hardener = SubprocessHardener(lines_to_fix)
+        new_tree = hardener.visit(tree)
+
+        if hardener.modified:
+            try:
+                modified_content = ast.unparse(new_tree)
+                self.modifications[file_path] = modified_content
+                self.notes.append(f"Hardened subprocess calls in {file_path}")
+            except Exception:
+                # If unparsing fails, fall back to regex
+                self._harden_subprocess_regex_fallback(file_path, lines_to_fix, content)
+
+    def _harden_subprocess_regex_fallback(self, file_path: str, lines_to_fix: Set[int], content: str):
+        """Fallback regex-based subprocess hardening with improved comma handling"""
+        lines = content.split('\n')
         modified = False
         modified_lines = lines[:]
 
@@ -365,13 +452,23 @@ class RefactorAgent:
                 idx = line_num - 1
                 line = modified_lines[idx]
 
-                # Remove shell=True
-                new_line = re.sub(r',?\s*shell\s*=\s*True\s*,?', '', line)
+                # More careful regex to preserve comma structure
+                # Match shell=True with optional surrounding whitespace and commas
+                new_line = line
 
-                # Add check=False if not present
+                # Remove , shell=True, -> ,
+                new_line = re.sub(r',\s*shell\s*=\s*True\s*,', ',', new_line)
+                # Remove , shell=True) -> )
+                new_line = re.sub(r',\s*shell\s*=\s*True\s*\)', ')', new_line)
+                # Remove (shell=True, -> (
+                new_line = re.sub(r'\(\s*shell\s*=\s*True\s*,', '(', new_line)
+                # Remove (shell=True) -> ()
+                new_line = re.sub(r'\(\s*shell\s*=\s*True\s*\)', '()', new_line)
+
+                # Add check=False if not present and if there's a subprocess call
                 if 'check=' not in new_line and 'subprocess.' in new_line:
                     # Add check=False before the closing paren
-                    new_line = re.sub(r'\)', ', check=False)', new_line)
+                    new_line = re.sub(r'\)(\s*)$', r', check=False)\1', new_line)
 
                 if new_line != line:
                     modified_lines[idx] = new_line
