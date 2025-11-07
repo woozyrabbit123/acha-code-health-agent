@@ -243,7 +243,7 @@ def test_validator_ignores_parent_pytest_ini():
     try:
         # Create a misleading pytest.ini at repo root
         misleading_config = "[pytest]\ntestpaths = nonexistent_dir\n"
-        with open(repo_pytest_ini, 'w') as f:
+        with open(repo_pytest_ini, 'w', encoding='utf-8', newline='\n') as f:
             f.write(misleading_config)
 
         # Create a temp target project with a passing test
@@ -275,7 +275,7 @@ def test_also_passes():
     finally:
         # Restore original pytest.ini
         if original_content is not None:
-            with open(repo_pytest_ini, 'w') as f:
+            with open(repo_pytest_ini, 'w', encoding='utf-8', newline='\n') as f:
                 f.write(original_content)
         elif repo_pytest_ini.exists():
             repo_pytest_ini.unlink()
