@@ -40,6 +40,21 @@ class PolicyEnforcer:
     def __init__(self, config: PolicyConfig):
         self.config = config
 
+    def _severity_to_string(self, severity) -> str:
+        """Convert numeric severity to string for classification"""
+        if isinstance(severity, str):
+            return severity.lower()
+
+        # Numeric severity mapping: 0.1=info, 0.4=warning, 0.7=error, 0.9=critical
+        if severity >= 0.9:
+            return "critical"
+        elif severity >= 0.7:
+            return "error"
+        elif severity >= 0.4:
+            return "warning"
+        else:
+            return "info"
+
     def check_violations(self, analysis_results: Dict) -> Tuple[bool, List[str]]:
         violations: List[str] = []
         errors = 0
@@ -47,7 +62,8 @@ class PolicyEnforcer:
         risky = 0
 
         for issue in analysis_results.get("issues", []):
-            sev = issue.get("severity", "info")
+            sev_raw = issue.get("severity", "info")
+            sev = self._severity_to_string(sev_raw)
             rule = issue.get("rule", "")
             if "risky" in rule:
                 risky += 1
