@@ -11,6 +11,9 @@ from pathlib import Path
 from acha.agents.analysis_agent import AnalysisAgent
 from acha.agents.refactor_agent import RefactorAgent
 from acha.agents.validation_agent import ValidationAgent
+from acha.baseline import compare_baseline, create_baseline
+from acha.precommit import precommit_command
+from acha.pro_license import is_pro, require_pro
 from acha.utils.ast_cache import ASTCache
 from acha.utils.checkpoint import checkpoint, restore
 from acha.utils.exporter import build_proof_pack
@@ -42,11 +45,19 @@ def analyze(args):
 
     # Setup parallel execution
     parallel = getattr(args, "parallel", False)
+    jobs = getattr(args, "jobs", None)
     max_workers = getattr(args, "max_workers", 4)
 
-    # Auto-detect parallel if not specified
-    if parallel is None:
-        # Enable parallel if more than 10 files expected
+    # Gate --jobs > 1 as Pro-only
+    if jobs is not None and jobs > 1 and not is_pro():
+        require_pro("Parallel Scanning (--jobs > 1)")
+
+    # Use --jobs if specified, otherwise use max_workers
+    if jobs is not None:
+        max_workers = jobs
+        parallel = jobs > 1
+    elif parallel is None:
+        # Auto-detect parallel if not specified
         parallel = True  # Default to enabled
 
     if len(targets) == 1:
@@ -72,10 +83,14 @@ def analyze(args):
     # Get output format
     output_format = getattr(args, "output_format", "json")
 
+    # Gate HTML output as Pro-only
+    if output_format in ["html", "all"] and not is_pro():
+        require_pro("HTML Report Output")
+
     # Always write JSON (required for other tools)
     json_path = reports_dir / "analysis.json"
     with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2)
+        json.dump(result, f, indent=2, sort_keys=True)
 
     output_files = [str(json_path)]
 
@@ -90,7 +105,7 @@ def analyze(args):
         )
         output_files.append(str(sarif_path))
 
-    # Generate HTML output if requested
+    # Generate HTML output if requested (Pro-gated above)
     if output_format in ["html", "all"]:
         html_reporter = HTMLReporter()
         html_path = reports_dir / "report.html"
@@ -122,12 +137,27 @@ def analyze(args):
 
 
 def refactor(args):
-    """Run code refactoring"""
+    """Run code refactoring with safety rails"""
+    import shutil
+    import subprocess
+
     target_dir = args.target
     analysis_path = args.analysis
+    fix_only = getattr(args, "fix", False)
+    apply_changes = getattr(args, "apply", False)
+    skip_confirmation = getattr(args, "yes", False)
+
+    # Gate --apply as Pro-only
+    if apply_changes and not is_pro():
+        require_pro("Refactoring with --apply")
+
+    # Default behavior: if neither --fix nor --apply is specified, use --fix (plan only)
+    if not fix_only and not apply_changes:
+        fix_only = True
 
     print(f"Refactoring code in: {target_dir}")
     print(f"Using analysis from: {analysis_path}")
+    print(f"Mode: {'PLAN ONLY (--fix)' if fix_only else 'APPLY CHANGES (--apply)'}")
 
     # Parse refactor types
     refactor_types = None
@@ -135,10 +165,42 @@ def refactor(args):
         refactor_types = [rt.strip() for rt in args.refactor_types.split(",")]
         print(f"Refactor types: {', '.join(refactor_types)}")
 
-    # Run refactoring
+    # Pre-flight checks for --apply
+    if apply_changes:
+        print("\n=== Pre-flight checks ===")
+
+        # Check git status (warn if dirty, don't block)
+        try:
+            result = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=target_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                print("⚠ Warning: Git working directory has uncommitted changes")
+                print("  Consider committing or stashing before applying refactorings")
+            elif result.returncode == 0:
+                print("✓ Git working directory is clean")
+        except FileNotFoundError:
+            print("⚠ Warning: git not found, skipping clean tree check")
+
+        # Create backup
+        backup_dir = Path("backups") / f"backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        print(f"\nCreating backup: {backup_dir}")
+        try:
+            shutil.copytree(target_dir, backup_dir, symlinks=True)
+            print(f"✓ Backup created at {backup_dir}")
+        except Exception as e:
+            print(f"✗ Failed to create backup: {e}")
+            return 1
+
+    # Run refactoring (always generates plan)
     agent = RefactorAgent(refactor_types=refactor_types)
     try:
-        patch_summary = agent.apply(target_dir, analysis_path)
+        # Generate plan (diff)
+        patch_summary = agent.apply(target_dir, analysis_path, plan_only=True)
     except Exception as e:
         print(f"Error during refactoring: {e}")
         return 1
@@ -147,18 +209,18 @@ def refactor(args):
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
 
-    # Write patch summary to reports/patch_summary.json
+    # Write patch summary
     summary_path = reports_dir / "patch_summary.json"
     with open(summary_path, "w", encoding="utf-8") as f:
-        json.dump(patch_summary, f, indent=2)
+        json.dump(patch_summary, f, indent=2, sort_keys=True)
 
     # Print summary
-    print("\nRefactoring complete!")
+    print("\n=== Refactoring Plan ===")
     print(f"Patch ID: {patch_summary['patch_id']}")
     print(f"Files touched: {len(patch_summary['files_touched'])}")
     print(f"Lines added: {patch_summary['lines_added']}")
     print(f"Lines removed: {patch_summary['lines_removed']}")
-    print("Diff written to: dist/patch.diff")
+    print(f"Diff written to: dist/patch.diff")
     print(f"Summary written to: {summary_path}")
 
     if patch_summary.get("notes"):
@@ -166,7 +228,44 @@ def refactor(args):
         for note in patch_summary["notes"]:
             print(f"  - {note}")
 
-    return 0
+    # If --fix only, stop here
+    if fix_only:
+        print("\n✓ Plan generated (use --apply to execute changes)")
+        return 0
+
+    # Apply changes if --apply specified
+    if apply_changes:
+        print("\n=== Applying Changes ===")
+
+        # Confirmation prompt (unless --yes)
+        if not skip_confirmation:
+            response = input("\nApply these changes? [y/N]: ")
+            if response.lower() not in ["y", "yes"]:
+                print("❌ Aborted by user")
+                return 1
+
+        print("Applying modifications...")
+        try:
+            # Actually apply the changes
+            from acha.utils.patcher import Patcher
+
+            patcher = Patcher()
+            patcher.prepare_workdir(target_dir)
+            patcher.apply_modifications(agent.modifications)
+
+            # Copy workdir back to target
+            for file_path, new_content in agent.modifications.items():
+                target_file = Path(target_dir) / file_path
+                with open(target_file, "w", encoding="utf-8") as f:
+                    f.write(new_content)
+
+            print("✓ Changes applied successfully")
+            print(f"  Backup available at: {backup_dir}")
+            return 0
+        except Exception as e:
+            print(f"✗ Error applying changes: {e}")
+            print(f"  Restore from backup: {backup_dir}")
+            return 1
 
 
 def validate(args):
@@ -326,7 +425,8 @@ def run_pipeline_command(args, policy=None):
 
     analyze_args = Args()
     analyze_args.target = target_dir
-    analyze_args.output_format = "all"  # Generate JSON, SARIF, and HTML
+    # Use "all" for Pro, "sarif" for Community (HTML is Pro-gated)
+    analyze_args.output_format = "all" if is_pro() else "sarif"
     analyze_args.parallel = True
     analyze_args.cache = True
     analyze_args.max_workers = 4
@@ -491,6 +591,104 @@ def run_pipeline_command(args, policy=None):
     return 0
 
 
+def baseline_create_cmd(args):
+    """Create baseline from analysis results"""
+    require_pro("Baseline System")
+
+    analysis_path = Path(args.analysis)
+    if not analysis_path.exists():
+        print(f"Error: Analysis file not found: {args.analysis}", file=sys.stderr)
+        return 1
+
+    output_path = args.output or "baseline.json"
+
+    # Load analysis
+    with open(analysis_path, encoding="utf-8") as f:
+        analysis = json.load(f)
+
+    findings = analysis.get("findings", [])
+
+    # Create baseline
+    print(f"Creating baseline from {len(findings)} findings...")
+    baseline = create_baseline(findings, output_path)
+
+    print(f"✓ Baseline created: {output_path}")
+    print(f"  Findings captured: {len(baseline['findings'])}")
+    return 0
+
+
+def baseline_compare_cmd(args):
+    """Compare current findings against baseline"""
+    require_pro("Baseline System")
+
+    analysis_path = Path(args.analysis)
+    baseline_path = Path(args.baseline)
+
+    if not analysis_path.exists():
+        print(f"Error: Analysis file not found: {args.analysis}", file=sys.stderr)
+        return 1
+
+    if not baseline_path.exists():
+        print(f"Error: Baseline file not found: {args.baseline}", file=sys.stderr)
+        return 1
+
+    # Load current analysis
+    with open(analysis_path, encoding="utf-8") as f:
+        analysis = json.load(f)
+
+    current_findings = analysis.get("findings", [])
+
+    # Compare
+    print(f"Comparing {len(current_findings)} current findings against baseline...")
+    comparison = compare_baseline(current_findings, str(baseline_path))
+
+    # Print summary
+    print("\nBaseline comparison results:")
+    print(f"  New findings: {comparison['summary']['new_count']}")
+    print(f"  Existing findings: {comparison['summary']['existing_count']}")
+    print(f"  Fixed findings: {comparison['summary']['fixed_count']}")
+
+    # Print new findings
+    if comparison["new"]:
+        print("\nNew findings:")
+        for finding in comparison["new"]:
+            file_path = finding.get("file", "unknown")
+            line = finding.get("start_line", "?")
+            rule = finding.get("rule", finding.get("finding", "unknown"))
+            print(f"  {file_path}:{line} [{rule}]")
+
+    # Print fixed findings
+    if comparison["fixed"]:
+        print(f"\nFixed findings ({len(comparison['fixed'])}):")
+        for finding_id in list(comparison["fixed"])[:10]:  # Show first 10
+            print(f"  {finding_id}")
+        if len(comparison["fixed"]) > 10:
+            print(f"  ... and {len(comparison['fixed']) - 10} more")
+
+    # Write comparison to file
+    output_path = Path("reports/baseline_comparison.json")
+    output_path.parent.mkdir(exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(comparison, f, indent=2, sort_keys=True)
+
+    print(f"\n✓ Comparison written to: {output_path}")
+
+    # Exit 1 if new findings
+    if comparison["new"]:
+        return 1
+    return 0
+
+
+def precommit_cmd(args):
+    """Run pre-commit scan"""
+    require_pro("Pre-commit Helper")
+
+    target_dir = args.target
+    baseline_path = args.baseline if hasattr(args, "baseline") else None
+
+    return precommit_command(target_dir, baseline_path)
+
+
 def main():
     parser = argparse.ArgumentParser(prog="acha", description="ACHA - AI Code Health Agent")
 
@@ -534,6 +732,12 @@ def main():
         "--max-workers", type=int, default=4, help="Number of worker threads (default: 4)"
     )
     parser_analyze.add_argument(
+        "--jobs",
+        "-j",
+        type=int,
+        help="Number of parallel jobs (Pro-gated if > 1; overrides --max-workers)",
+    )
+    parser_analyze.add_argument(
         "--cache", action="store_true", default=True, help="Enable AST cache (default: enabled)"
     )
     parser_analyze.add_argument(
@@ -548,6 +752,22 @@ def main():
     parser_refactor.add_argument(
         "--refactor-types",
         help="Comma-separated list of refactor types (default: inline_const,remove_unused_import)",
+    )
+    parser_refactor.add_argument(
+        "--fix",
+        action="store_true",
+        help="Plan refactoring only (generate diff, no writes)",
+    )
+    parser_refactor.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply refactoring changes (Pro-gated, writes to files)",
+    )
+    parser_refactor.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Skip confirmation prompts (use with --apply)",
     )
     parser_refactor.set_defaults(func=refactor)
 
@@ -575,6 +795,44 @@ def main():
     parser_run.add_argument("--refactor-types", help="Comma-separated list of refactor types")
     parser_run.add_argument("--aggressive", action="store_true", help="Enable all refactor types")
     parser_run.set_defaults(func=run_pipeline_command)
+
+    # baseline subcommand (Pro-only)
+    parser_baseline = subparsers.add_parser("baseline", help="Baseline management (Pro)")
+    baseline_subs = parser_baseline.add_subparsers(dest="baseline_command", help="Baseline commands")
+
+    # baseline create
+    parser_baseline_create = baseline_subs.add_parser("create", help="Create baseline from analysis")
+    parser_baseline_create.add_argument(
+        "--analysis", required=True, help="Path to analysis.json file"
+    )
+    parser_baseline_create.add_argument(
+        "--output", "-o", help="Output path for baseline (default: baseline.json)"
+    )
+    parser_baseline_create.set_defaults(func=baseline_create_cmd)
+
+    # baseline compare
+    parser_baseline_compare = baseline_subs.add_parser(
+        "compare", help="Compare analysis against baseline"
+    )
+    parser_baseline_compare.add_argument(
+        "--analysis", required=True, help="Path to current analysis.json"
+    )
+    parser_baseline_compare.add_argument(
+        "--baseline", required=True, help="Path to baseline.json"
+    )
+    parser_baseline_compare.set_defaults(func=baseline_compare_cmd)
+
+    # precommit subcommand (Pro-only)
+    parser_precommit = subparsers.add_parser(
+        "precommit", help="Pre-commit hook helper (Pro)"
+    )
+    parser_precommit.add_argument(
+        "--target", default=".", help="Target directory (default: current directory)"
+    )
+    parser_precommit.add_argument(
+        "--baseline", help="Optional baseline.json to compare against"
+    )
+    parser_precommit.set_defaults(func=precommit_cmd)
 
     args = parser.parse_args()
 
