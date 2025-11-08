@@ -29,6 +29,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+pro = [
+    "PyNaCl>=1.5.0",
+]
 test = [
     "pytest>=7.0",
     "pytest-timeout>=2.0",
@@ -40,7 +43,7 @@ dev = [
     "mypy>=1.0",
 ]
 all = [
-    "acha-code-health[test,dev]",
+    "acha-code-health[test,dev,pro]",
 ]
 
 [project.urls]

@@ -47,13 +47,16 @@ class RefactorAgent:
             except ValueError:
                 self.notes.append(f"Unknown refactor type: {rt}")
 
-    def apply(self, target_dir: str, analysis_json_path: str) -> dict[str, Any]:
+    def apply(
+        self, target_dir: str, analysis_json_path: str, plan_only: bool = False
+    ) -> dict[str, Any]:
         """
         Apply refactoring based on analysis findings.
 
         Args:
             target_dir: Directory containing source code
             analysis_json_path: Path to analysis.json file
+            plan_only: If True, generate plan (diff) only without applying changes
 
         Returns:
             PatchSummary dictionary
@@ -119,8 +122,9 @@ class RefactorAgent:
         combined_diff = "\n".join(all_diffs)
         self.patcher.write_patch(combined_diff)
 
-        # Apply modifications to workdir
-        self.patcher.apply_modifications(self.modifications)
+        # Apply modifications to workdir (unless plan_only)
+        if not plan_only:
+            self.patcher.apply_modifications(self.modifications)
 
         # Count diff stats
         lines_added, lines_removed = self.patcher.count_diff_stats(combined_diff)
