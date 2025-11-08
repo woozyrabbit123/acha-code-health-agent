@@ -32,7 +32,7 @@ class RefactorAgent:
             refactor_types: List of refactor type strings to apply.
                            Defaults to ["inline_const", "remove_unused_import"]
         """
-        self.patcher = Patcher()
+        self.patcher = Patcher(dist_dir="reports")  # Write patches to reports/ directory
         self.modifications = {}
         self.notes = []
 

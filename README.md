@@ -221,7 +221,8 @@ x = eval(user_input)  # acha: disable-all
 ACHA guarantees **reproducible, deterministic outputs** for CI/CD and security auditing:
 
 - **Same input → same output**: Running analysis twice on unchanged code produces identical JSON/SARIF (except timestamps)
-- **Parallel invariance**: `--jobs 1` and `--jobs 8` produce identical findings (order may vary, but content is identical)
+- **Parallel invariance**: `--jobs 1` and `--jobs 8` produce identical findings in identical order (thread-safe, deterministic execution)
+- **Unique finding IDs**: Thread-safe ID generation ensures no collisions in parallel execution
 - **Stable baseline IDs**: Baseline IDs are SHA256 hashes, ensuring reproducibility across machines
 - **Cross-platform consistency**: Analysis results are consistent across Linux, macOS, and Windows
 

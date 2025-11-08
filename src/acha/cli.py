@@ -49,17 +49,21 @@ def analyze(args):
     jobs = getattr(args, "jobs", None)
     max_workers = getattr(args, "max_workers", 4)
 
-    # Gate --jobs > 1 as Pro-only
-    if jobs is not None and jobs > 1 and not is_pro():
-        require_pro("Parallel Scanning (--jobs > 1)")
+    # Gate parallel execution as Pro-only (for max_workers > 1)
+    # Community users are limited to single-threaded execution
+    if not is_pro():
+        # Check if user explicitly requested parallel execution
+        if jobs is not None and jobs > 1:
+            require_pro("Parallel Scanning (--jobs > 1)")
+        if max_workers > 1 and parallel:
+            # Community edition: force single worker
+            max_workers = 1
+            parallel = False
 
     # Use --jobs if specified, otherwise use max_workers
     if jobs is not None:
         max_workers = jobs
         parallel = jobs > 1
-    elif parallel is None:
-        # Auto-detect parallel if not specified
-        parallel = True  # Default to enabled
 
     if len(targets) == 1:
         print(f"Analyzing code in: {targets[0]}")
@@ -147,6 +151,7 @@ def refactor(args):
     fix_only = getattr(args, "fix", False)
     apply_changes = getattr(args, "apply", False)
     skip_confirmation = getattr(args, "yes", False)
+    force = getattr(args, "force", False)
 
     # Gate --apply as Pro-only
     if apply_changes and not is_pro():
@@ -170,7 +175,7 @@ def refactor(args):
     if apply_changes:
         print("\n=== Pre-flight checks ===")
 
-        # Check git status (warn if dirty, don't block)
+        # Dirty repo guard: abort if uncommitted changes (unless --force)
         try:
             result = subprocess.run(
                 ["git", "status", "--porcelain"],
@@ -180,15 +185,29 @@ def refactor(args):
                 check=False,
             )
             if result.returncode == 0 and result.stdout.strip():
-                print("⚠ Warning: Git working directory has uncommitted changes")
-                print("  Consider committing or stashing before applying refactorings")
+                if not force:
+                    print("❌ ERROR: Git working directory has uncommitted changes")
+                    print("  Refusing to apply refactorings to dirty repository")
+                    print("  Options:")
+                    print("    1. Commit or stash your changes first")
+                    print("    2. Use --force to override this check (not recommended)")
+                    sys.exit(2)
+                else:
+                    print("⚠ Warning: Git working directory has uncommitted changes (--force override)")
             elif result.returncode == 0:
                 print("✓ Git working directory is clean")
         except FileNotFoundError:
-            print("⚠ Warning: git not found, skipping clean tree check")
+            if not force:
+                print("❌ ERROR: git not found, cannot verify clean tree")
+                print("  Use --force to override (not recommended)")
+                sys.exit(2)
+            else:
+                print("⚠ Warning: git not found, skipping clean tree check (--force override)")
 
-        # Create backup
-        backup_dir = Path("backups") / f"backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        # Create backup in acha_backup/ directory
+        backup_root = Path("acha_backup")
+        backup_root.mkdir(exist_ok=True)
+        backup_dir = backup_root / f"backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         print(f"\nCreating backup: {backup_dir}")
         try:
             shutil.copytree(target_dir, backup_dir, symlinks=True)
@@ -221,7 +240,7 @@ def refactor(args):
     print(f"Files touched: {len(patch_summary['files_touched'])}")
     print(f"Lines added: {patch_summary['lines_added']}")
     print(f"Lines removed: {patch_summary['lines_removed']}")
-    print("Diff written to: dist/patch.diff")
+    print("Diff written to: reports/patch.diff")
     print(f"Summary written to: {summary_path}")
 
     if patch_summary.get("notes"):
@@ -725,13 +744,16 @@ def main():
         "--parallel",
         action="store_true",
         default=True,
-        help="Enable parallel analysis (default: enabled)",
+        help="Enable parallel analysis (default: enabled; Pro required for max-workers > 1)",
     )
     parser_analyze.add_argument(
         "--no-parallel", action="store_false", dest="parallel", help="Disable parallel analysis"
     )
     parser_analyze.add_argument(
-        "--max-workers", type=int, default=4, help="Number of worker threads (default: 4)"
+        "--max-workers",
+        type=int,
+        default=4,
+        help="Number of worker threads (default: 4; Pro required if > 1)",
     )
     parser_analyze.add_argument(
         "--jobs",
@@ -770,6 +792,11 @@ def main():
         "-y",
         action="store_true",
         help="Skip confirmation prompts (use with --apply)",
+    )
+    parser_refactor.add_argument(
+        "--force",
+        action="store_true",
+        help="Force apply changes even with dirty git tree (not recommended)",
     )
     parser_refactor.set_defaults(func=refactor)
 

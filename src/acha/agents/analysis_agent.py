@@ -1,6 +1,7 @@
 """Analysis Agent - detects code quality issues"""
 
 import ast
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -209,14 +210,16 @@ class AnalysisAgent:
         self.dup_threshold = dup_threshold
         self.findings = []
         self.finding_counter = 0
+        self._counter_lock = threading.Lock()  # Thread-safe counter for parallel execution
         self.cache = cache
         self.parallel = parallel
         self.max_workers = max_workers
 
     def _generate_finding_id(self) -> str:
-        """Generate a unique finding ID"""
-        self.finding_counter += 1
-        return f"ANL-{self.finding_counter:03d}"
+        """Generate a unique, thread-safe finding ID"""
+        with self._counter_lock:
+            self.finding_counter += 1
+            return f"ANL-{self.finding_counter:03d}"
 
     def _severity_to_numeric(self, severity) -> float:
         """Convert severity string to numeric value for schema compatibility"""
@@ -282,16 +285,35 @@ class AnalysisAgent:
         if not target_path.exists():
             raise ValueError(f"Target directory does not exist: {target_dir}")
 
-        # Find all Python files
-        python_files = list(target_path.rglob("*.py"))
+        # Find all Python files (sorted for deterministic ordering)
+        python_files = sorted(target_path.rglob("*.py"), key=lambda p: str(p))
 
         if self.parallel and len(python_files) > 1:
             # Use parallel analysis
             self._analyze_parallel(python_files, target_path)
         else:
-            # Sequential analysis
+            # Sequential analysis (files already sorted for determinism)
             for py_file in python_files:
                 self._analyze_file(py_file, target_path)
+
+        # Sort all findings for deterministic output (both sequential and parallel)
+        # Parallel mode already sorts, but sequential mode needs this
+        self.findings.sort(
+            key=lambda f: (
+                f.get("file", ""),
+                f.get("start_line", 0),
+                f.get("end_line", 0),
+                f.get("rule", ""),
+                f.get("rationale", ""),
+            )
+        )
+
+        # Regenerate IDs in sorted order to ensure monotonic IDs
+        # (parallel mode already does this, but sequential mode needs it too)
+        if not self.parallel or len(python_files) <= 1:
+            self.finding_counter = 0
+            for finding in self.findings:
+                finding["id"] = self._generate_finding_id()
 
         return {"findings": self.findings}
 
@@ -317,7 +339,8 @@ class AnalysisAgent:
                 results[target_dir] = []
                 continue
 
-            python_files = list(target_path.rglob("*.py"))
+            # Sort files for deterministic ordering
+            python_files = sorted(target_path.rglob("*.py"), key=lambda p: str(p))
 
             if self.parallel and len(python_files) > 1:
                 self._analyze_parallel(python_files, target_path)
@@ -325,19 +348,37 @@ class AnalysisAgent:
                 for py_file in python_files:
                     self._analyze_file(py_file, target_path)
 
+            # Sort findings for deterministic output
+            self.findings.sort(
+                key=lambda f: (
+                    f.get("file", ""),
+                    f.get("start_line", 0),
+                    f.get("end_line", 0),
+                    f.get("rule", ""),
+                    f.get("rationale", ""),
+                )
+            )
+
+            # Regenerate IDs in sorted order (for sequential mode)
+            if not self.parallel or len(python_files) <= 1:
+                self.finding_counter = 0
+                for finding in self.findings:
+                    finding["id"] = self._generate_finding_id()
+
             results[target_dir] = self.findings
 
         return results
 
     def _analyze_parallel(self, python_files: list[Path], base_path: Path):
-        """Analyze files in parallel"""
+        """Analyze files in parallel with deterministic ordering"""
         executor = ParallelExecutor(max_workers=self.max_workers, verbose=False)
 
-        def analyze_single(py_file: Path) -> list[dict]:
+        # Sort files by path for deterministic ordering
+        sorted_files = sorted(python_files, key=lambda p: str(p))
+
+        def analyze_single(py_file: Path) -> tuple[str, list[dict]]:
             # Create a temporary findings list for this file
             original_findings = self.findings
-            original_counter = self.finding_counter
-
             self.findings = []
 
             self._analyze_file(py_file, base_path)
@@ -347,26 +388,39 @@ class AnalysisAgent:
 
             # Restore original state
             self.findings = original_findings
-            self.finding_counter = original_counter
 
-            return file_findings
+            return (str(py_file), file_findings)
 
         # Analyze files in parallel
-        all_file_findings = executor.map_parallel(analyze_single, python_files)
+        results = executor.map_parallel(analyze_single, sorted_files)
 
-        # Combine findings
-        for file_findings in all_file_findings:
+        # Create a mapping of file path to findings for deterministic ordering
+        findings_by_file = {file_path: findings for file_path, findings in results}
+
+        # Collect all findings from all files
+        all_findings = []
+        for file_path in sorted(findings_by_file.keys()):
+            file_findings = findings_by_file[file_path]
             if file_findings:
-                self.findings.extend(file_findings)
-                # Update counter based on findings added
-                for finding in file_findings:
-                    if "id" in finding:
-                        # Extract counter from id like "ANL-001"
-                        try:
-                            counter = int(finding["id"].split("-")[1])
-                            self.finding_counter = max(self.finding_counter, counter)
-                        except Exception:
-                            pass
+                # Sort findings within each file by multiple keys for full determinism
+                file_findings.sort(
+                    key=lambda f: (
+                        f.get("start_line", 0),
+                        f.get("end_line", 0),
+                        f.get("rule", ""),
+                        f.get("rationale", ""),
+                    )
+                )
+                all_findings.extend(file_findings)
+
+        # Reset counter and regenerate finding IDs in sorted order to ensure monotonic IDs
+        # This ensures IDs are always 1, 2, 3... regardless of parallel execution order
+        self.finding_counter = 0
+        for finding in all_findings:
+            finding["id"] = self._generate_finding_id()
+
+        # Add to findings list
+        self.findings.extend(all_findings)
 
     def _analyze_file(self, file_path: Path, base_path: Path):
         """Analyze a single Python file"""
