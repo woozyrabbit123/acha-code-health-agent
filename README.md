@@ -114,10 +114,10 @@ All artifacts are written to `reports/`:
 - `baseline.json` - Baseline snapshot for tracking changes (Pro)
 - `baseline_comparison.json` - NEW/EXISTING/FIXED comparison (Pro)
 
-Refactoring outputs in `dist/`:
+Refactoring outputs in `reports/`:
 - `patch.diff` - Unified diff of proposed changes (Community)
 
-Safety backups in `backups/`:
+Safety backups in `acha_backup/`:
 - `backup-TIMESTAMP/` - Automatic backup before applying changes (Pro)
 
 ## Features
@@ -178,7 +178,7 @@ def legacy_function():  # acha: disable=high_complexity
 
 **5. Safety Rails for Refactoring**
 - Dirty tree detection (warns if uncommitted changes)
-- Automatic backups before changes (`backups/backup-TIMESTAMP/`)
+- Automatic backups before changes (`acha_backup/backup-TIMESTAMP/`)
 - User confirmation prompts (unless `--yes`)
 - Rollback mechanisms for failed refactorings
 
