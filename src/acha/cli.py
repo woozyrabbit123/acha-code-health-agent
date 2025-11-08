@@ -47,18 +47,17 @@ def analyze(args):
     # Setup parallel execution
     parallel = getattr(args, "parallel", False)
     jobs = getattr(args, "jobs", None)
-    max_workers = getattr(args, "max_workers", 4)
+    max_workers = getattr(args, "max_workers", 1)
 
     # Gate parallel execution as Pro-only (for max_workers > 1)
-    # Community users are limited to single-threaded execution
+    # Community users must use single-threaded execution
     if not is_pro():
         # Check if user explicitly requested parallel execution
         if jobs is not None and jobs > 1:
             require_pro("Parallel Scanning (--jobs > 1)")
-        if max_workers > 1 and parallel:
-            # Community edition: force single worker
-            max_workers = 1
-            parallel = False
+        if max_workers > 1:
+            # User explicitly requested max_workers > 1 without Pro license
+            require_pro("Parallel Scanning (--max-workers > 1)")
 
     # Use --jobs if specified, otherwise use max_workers
     if jobs is not None:
@@ -449,7 +448,9 @@ def run_pipeline_command(args, policy=None):
     analyze_args.output_format = "all" if is_pro() else "sarif"
     analyze_args.parallel = True
     analyze_args.cache = True
-    analyze_args.max_workers = 4
+    # Use 4 workers for Pro, 1 for Community (default)
+    analyze_args.max_workers = 4 if is_pro() else 1
+    analyze_args.jobs = None
 
     result = analyze(analyze_args)
     if result != 0:
@@ -744,7 +745,7 @@ def main():
         "--parallel",
         action="store_true",
         default=True,
-        help="Enable parallel analysis (default: enabled; Pro required for max-workers > 1)",
+        help="Enable parallel analysis (default: enabled; Pro required if > 1 worker)",
     )
     parser_analyze.add_argument(
         "--no-parallel", action="store_false", dest="parallel", help="Disable parallel analysis"
@@ -752,8 +753,8 @@ def main():
     parser_analyze.add_argument(
         "--max-workers",
         type=int,
-        default=4,
-        help="Number of worker threads (default: 4; Pro required if > 1)",
+        default=1,
+        help="Number of worker threads (default: 1; Pro required if > 1)",
     )
     parser_analyze.add_argument(
         "--jobs",
