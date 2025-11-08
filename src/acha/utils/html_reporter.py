@@ -19,6 +19,7 @@ class HTMLReporter:
         patch: dict | None = None,
         validation: dict | None = None,
         target_path: str = ".",
+        baseline_comparison: dict | None = None,
     ) -> str:
         """
         Generate self-contained HTML report.
@@ -28,6 +29,7 @@ class HTMLReporter:
             patch: Patch summary dictionary
             validation: Validation results dictionary
             target_path: Path to analyzed project
+            baseline_comparison: Optional baseline comparison results
 
         Returns:
             Complete HTML document as string
@@ -35,6 +37,7 @@ class HTMLReporter:
         analysis = analysis or {}
         patch = patch or {}
         validation = validation or {}
+        baseline_comparison = baseline_comparison or {}
 
         findings = analysis.get("findings", [])
 
@@ -59,7 +62,7 @@ class HTMLReporter:
 
         {self._build_summary_cards(analysis, patch, validation)}
 
-        {self._build_findings_section(findings)}
+        {self._build_findings_section(findings, baseline_comparison)}
 
         {self._build_patch_section(patch)}
 
@@ -301,6 +304,61 @@ class HTMLReporter:
             color: white;
         }
 
+        .status-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 10px;
+            font-size: 0.75em;
+            font-weight: 600;
+            margin-left: 5px;
+        }
+
+        .status-new {
+            background: #ff5722;
+            color: white;
+        }
+
+        .status-existing {
+            background: #9e9e9e;
+            color: white;
+        }
+
+        .status-fixed {
+            background: #4caf50;
+            color: white;
+        }
+
+        .suppressed-badge {
+            background: #9c27b0;
+            color: white;
+        }
+
+        .baseline-summary {
+            background: var(--bg-secondary);
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .baseline-stat {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .baseline-stat-label {
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .baseline-stat-value {
+            font-size: 1.2em;
+            font-weight: 700;
+        }
+
         .no-findings {
             text-align: center;
             padding: 40px;
@@ -449,19 +507,27 @@ class HTMLReporter:
         // Filter functionality
         const filterInput = document.getElementById('findingFilter');
         const severityFilter = document.getElementById('severityFilter');
+        const ruleFilter = document.getElementById('ruleFilter');
+        const statusFilter = document.getElementById('statusFilter');
 
         function filterFindings() {
             const searchText = filterInput?.value.toLowerCase() || '';
             const severity = severityFilter?.value || 'all';
+            const rule = ruleFilter?.value || 'all';
+            const status = statusFilter?.value || 'all';
 
             document.querySelectorAll('.findings-table tbody tr').forEach(row => {
                 const text = row.textContent.toLowerCase();
                 const rowSeverity = row.querySelector('[data-severity]')?.dataset.severity || '';
+                const rowRule = row.querySelector('[data-rule]')?.dataset.rule || '';
+                const rowStatus = row.dataset.status || '';
 
                 const textMatch = text.includes(searchText);
                 const severityMatch = severity === 'all' || rowSeverity.includes(severity);
+                const ruleMatch = rule === 'all' || rowRule === rule;
+                const statusMatch = status === 'all' || rowStatus === status;
 
-                row.style.display = (textMatch && severityMatch) ? '' : 'none';
+                row.style.display = (textMatch && severityMatch && ruleMatch && statusMatch) ? '' : 'none';
             });
         }
 
@@ -471,6 +537,14 @@ class HTMLReporter:
 
         if (severityFilter) {
             severityFilter.addEventListener('change', filterFindings);
+        }
+
+        if (ruleFilter) {
+            ruleFilter.addEventListener('change', filterFindings);
+        }
+
+        if (statusFilter) {
+            statusFilter.addEventListener('change', filterFindings);
         }
 """
 
@@ -529,8 +603,12 @@ class HTMLReporter:
         </div>
 """
 
-    def _build_findings_section(self, findings: list[dict]) -> str:
+    def _build_findings_section(
+        self, findings: list[dict], baseline_comparison: dict | None = None
+    ) -> str:
         """Build findings table section"""
+        baseline_comparison = baseline_comparison or {}
+
         if not findings:
             return """
         <div class="section">
@@ -538,6 +616,20 @@ class HTMLReporter:
             <div class="no-findings">✅ No findings detected. Great job!</div>
         </div>
 """
+
+        # Build baseline lookup if provided
+        new_finding_ids = set()
+        existing_finding_ids = set()
+        if baseline_comparison:
+            new_findings = baseline_comparison.get("new", [])
+            existing_findings = baseline_comparison.get("existing", [])
+            # Create lookup by finding properties
+            for f in new_findings:
+                fid = f"{f.get('file')}:{f.get('start_line')}:{f.get('rule')}"
+                new_finding_ids.add(fid)
+            for f in existing_findings:
+                fid = f"{f.get('file')}:{f.get('start_line')}:{f.get('rule')}"
+                existing_finding_ids.add(fid)
 
         # Build table rows
         rows = []
@@ -551,12 +643,31 @@ class HTMLReporter:
             rule = html.escape(finding.get("finding") or finding.get("rule", "unknown"))
             rationale = html.escape(finding.get("rationale") or finding.get("message", ""))
 
+            # Determine baseline status
+            finding_id = f"{finding.get('file')}:{finding.get('start_line')}:{finding.get('rule')}"
+            status_badge = ""
+            status_class = ""
+            if baseline_comparison:
+                if finding_id in new_finding_ids:
+                    status_badge = '<span class="status-badge status-new">NEW</span>'
+                    status_class = "new"
+                elif finding_id in existing_finding_ids:
+                    status_badge = '<span class="status-badge status-existing">EXISTING</span>'
+                    status_class = "existing"
+
+            # Check if suppressed
+            suppressed = finding.get("suppressed", False) or finding.get("suppressed_by")
+            suppressed_badge = ""
+            if suppressed:
+                suppressed_badge = '<span class="status-badge suppressed-badge">SUPPRESSED</span>'
+
             rows.append(
                 f"""
-                <tr>
+                <tr data-status="{status_class}">
                     <td data-severity="{severity_str}">{i+1}</td>
                     <td data-severity="{severity_str}">
                         <span class="severity-badge severity-{severity_class}">{severity_str}</span>
+                        {status_badge}{suppressed_badge}
                     </td>
                     <td data-file="{file_name}"><code>{file_name}</code></td>
                     <td data-line="{line}">{line}</td>
@@ -566,9 +677,44 @@ class HTMLReporter:
             """
             )
 
+        # Build baseline summary if provided
+        baseline_summary_html = ""
+        if baseline_comparison:
+            summary = baseline_comparison.get("summary", {})
+            new_count = summary.get("new_count", 0)
+            existing_count = summary.get("existing_count", 0)
+            fixed_count = summary.get("fixed_count", 0)
+            baseline_summary_html = f"""
+            <div class="baseline-summary">
+                <div class="baseline-stat">
+                    <span class="baseline-stat-label">🆕 New:</span>
+                    <span class="baseline-stat-value" style="color: #ff5722;">{new_count}</span>
+                </div>
+                <div class="baseline-stat">
+                    <span class="baseline-stat-label">📍 Existing:</span>
+                    <span class="baseline-stat-value" style="color: #9e9e9e;">{existing_count}</span>
+                </div>
+                <div class="baseline-stat">
+                    <span class="baseline-stat-label">✅ Fixed:</span>
+                    <span class="baseline-stat-value" style="color: #4caf50;">{fixed_count}</span>
+                </div>
+            </div>
+            """
+
+        # Collect unique rules for filter
+        unique_rules = sorted(set(
+            finding.get("finding") or finding.get("rule", "unknown")
+            for finding in findings
+        ))
+        rule_options = "\n".join(
+            f'<option value="{html.escape(rule)}">{html.escape(rule)}</option>'
+            for rule in unique_rules
+        )
+
         return f"""
         <div class="section">
             <h2 class="section-title">📊 Findings</h2>
+            {baseline_summary_html}
 
             <div class="controls">
                 <div class="control-group">
@@ -585,6 +731,21 @@ class HTMLReporter:
                         <option value="info">Info</option>
                     </select>
                 </div>
+                <div class="control-group">
+                    <label for="ruleFilter">Rule:</label>
+                    <select id="ruleFilter">
+                        <option value="all">All</option>
+                        {rule_options}
+                    </select>
+                </div>
+                {f'''<div class="control-group">
+                    <label for="statusFilter">Status:</label>
+                    <select id="statusFilter">
+                        <option value="all">All</option>
+                        <option value="new">New</option>
+                        <option value="existing">Existing</option>
+                    </select>
+                </div>''' if baseline_comparison else ''}
             </div>
 
             <table class="findings-table">
@@ -697,7 +858,10 @@ class HTMLReporter:
         patch: dict | None = None,
         validation: dict | None = None,
         target_path: str = ".",
+        baseline_comparison: dict | None = None,
     ):
         """Generate and write HTML report"""
-        html_content = self.generate(analysis, patch, validation, target_path)
+        html_content = self.generate(
+            analysis, patch, validation, target_path, baseline_comparison
+        )
         self.write(html_content, output_path)
