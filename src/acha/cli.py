@@ -8,6 +8,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from acha import __version__
 from acha.agents.analysis_agent import AnalysisAgent
 from acha.agents.refactor_agent import RefactorAgent
 from acha.agents.validation_agent import ValidationAgent
@@ -220,7 +221,7 @@ def refactor(args):
     print(f"Files touched: {len(patch_summary['files_touched'])}")
     print(f"Lines added: {patch_summary['lines_added']}")
     print(f"Lines removed: {patch_summary['lines_removed']}")
-    print(f"Diff written to: dist/patch.diff")
+    print("Diff written to: dist/patch.diff")
     print(f"Summary written to: {summary_path}")
 
     if patch_summary.get("notes"):
@@ -693,6 +694,7 @@ def main():
     parser = argparse.ArgumentParser(prog="acha", description="ACHA - AI Code Health Agent")
 
     # Global flags
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--config", type=Path, help="Path to configuration file (JSON)")
     parser.add_argument("--policy", type=Path, help="Path to policy file (JSON quality gates)")
     parser.add_argument(
@@ -717,7 +719,7 @@ def main():
         "--output-format",
         choices=["json", "sarif", "html", "all"],
         default="json",
-        help="Output format (default: json)",
+        help="Output format (default: json; html requires Pro)",
     )
     parser_analyze.add_argument(
         "--parallel",
@@ -735,7 +737,7 @@ def main():
         "--jobs",
         "-j",
         type=int,
-        help="Number of parallel jobs (Pro-gated if > 1; overrides --max-workers)",
+        help="Number of parallel jobs (Pro required if > 1; overrides --max-workers)",
     )
     parser_analyze.add_argument(
         "--cache", action="store_true", default=True, help="Enable AST cache (default: enabled)"
@@ -761,7 +763,7 @@ def main():
     parser_refactor.add_argument(
         "--apply",
         action="store_true",
-        help="Apply refactoring changes (Pro-gated, writes to files)",
+        help="Apply refactoring changes (Pro required; writes to files)",
     )
     parser_refactor.add_argument(
         "--yes",
@@ -798,10 +800,14 @@ def main():
 
     # baseline subcommand (Pro-only)
     parser_baseline = subparsers.add_parser("baseline", help="Baseline management (Pro)")
-    baseline_subs = parser_baseline.add_subparsers(dest="baseline_command", help="Baseline commands")
+    baseline_subs = parser_baseline.add_subparsers(
+        dest="baseline_command", help="Baseline commands"
+    )
 
     # baseline create
-    parser_baseline_create = baseline_subs.add_parser("create", help="Create baseline from analysis")
+    parser_baseline_create = baseline_subs.add_parser(
+        "create", help="Create baseline from analysis"
+    )
     parser_baseline_create.add_argument(
         "--analysis", required=True, help="Path to analysis.json file"
     )
@@ -817,21 +823,15 @@ def main():
     parser_baseline_compare.add_argument(
         "--analysis", required=True, help="Path to current analysis.json"
     )
-    parser_baseline_compare.add_argument(
-        "--baseline", required=True, help="Path to baseline.json"
-    )
+    parser_baseline_compare.add_argument("--baseline", required=True, help="Path to baseline.json")
     parser_baseline_compare.set_defaults(func=baseline_compare_cmd)
 
     # precommit subcommand (Pro-only)
-    parser_precommit = subparsers.add_parser(
-        "precommit", help="Pre-commit hook helper (Pro)"
-    )
+    parser_precommit = subparsers.add_parser("precommit", help="Pre-commit hook helper (Pro)")
     parser_precommit.add_argument(
         "--target", default=".", help="Target directory (default: current directory)"
     )
-    parser_precommit.add_argument(
-        "--baseline", help="Optional baseline.json to compare against"
-    )
+    parser_precommit.add_argument("--baseline", help="Optional baseline.json to compare against")
     parser_precommit.set_defaults(func=precommit_cmd)
 
     args = parser.parse_args()

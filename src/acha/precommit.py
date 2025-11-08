@@ -4,7 +4,6 @@ Pre-commit helper for ACHA Pro.
 Scans only staged files and exits 1 on NEW HIGH severities.
 """
 
-import json
 import subprocess
 import sys
 from pathlib import Path
@@ -126,7 +125,7 @@ def run_precommit_scan(
             high_severity_findings.append(finding)
 
     # Print summary
-    print(f"\nPre-commit scan results:")
+    print("\nPre-commit scan results:")
     print(f"  Total findings: {len(findings)}")
     if baseline_path:
         print(f"  New findings: {len(new_findings)}")

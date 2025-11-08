@@ -11,12 +11,11 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 # Try to import PyNaCl for Ed25519 verification
 try:
-    import nacl.signing
     import nacl.encoding
+    import nacl.signing
 
     NACL_AVAILABLE = True
 except ImportError:
@@ -39,7 +38,7 @@ class ProLicense:
     def __init__(self):
         """Initialize license validator"""
         self.pubkey_b64 = os.environ.get("ACHA_PRO_PUBKEY_B64", self.DEFAULT_PUBKEY_B64)
-        self.license_data: Optional[dict] = None
+        self.license_data: dict | None = None
         self.is_valid = False
         self._load_license()
 
@@ -53,7 +52,7 @@ class ProLicense:
         for path in license_paths:
             if path.exists():
                 try:
-                    with open(path, "r", encoding="utf-8") as f:
+                    with open(path, encoding="utf-8") as f:
                         data = json.load(f)
                     if self._verify_license(data):
                         self.license_data = data
@@ -151,7 +150,7 @@ class ProLicense:
 
 
 # Global license instance
-_license: Optional[ProLicense] = None
+_license: ProLicense | None = None
 
 
 def get_license() -> ProLicense:

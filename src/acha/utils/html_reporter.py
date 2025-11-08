@@ -702,10 +702,9 @@ class HTMLReporter:
             """
 
         # Collect unique rules for filter
-        unique_rules = sorted(set(
-            finding.get("finding") or finding.get("rule", "unknown")
-            for finding in findings
-        ))
+        unique_rules = sorted(
+            set(finding.get("finding") or finding.get("rule", "unknown") for finding in findings)
+        )
         rule_options = "\n".join(
             f'<option value="{html.escape(rule)}">{html.escape(rule)}</option>'
             for rule in unique_rules
@@ -738,7 +737,7 @@ class HTMLReporter:
                         {rule_options}
                     </select>
                 </div>
-                {f'''<div class="control-group">
+                {'''<div class="control-group">
                     <label for="statusFilter">Status:</label>
                     <select id="statusFilter">
                         <option value="all">All</option>
@@ -861,7 +860,5 @@ class HTMLReporter:
         baseline_comparison: dict | None = None,
     ):
         """Generate and write HTML report"""
-        html_content = self.generate(
-            analysis, patch, validation, target_path, baseline_comparison
-        )
+        html_content = self.generate(analysis, patch, validation, target_path, baseline_comparison)
         self.write(html_content, output_path)
