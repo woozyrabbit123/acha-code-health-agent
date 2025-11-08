@@ -67,9 +67,7 @@ def create_baseline(findings: list[dict[str, Any]], output_path: str) -> dict[st
     return baseline
 
 
-def compare_baseline(
-    current_findings: list[dict[str, Any]], baseline_path: str
-) -> dict[str, Any]:
+def compare_baseline(current_findings: list[dict[str, Any]], baseline_path: str) -> dict[str, Any]:
     """
     Compare current findings against baseline.
 
@@ -81,7 +79,7 @@ def compare_baseline(
         Dict with 'new', 'fixed', 'existing' lists
     """
     # Load baseline
-    with open(baseline_path, "r", encoding="utf-8") as f:
+    with open(baseline_path, encoding="utf-8") as f:
         baseline = json.load(f)
 
     baseline_ids = set(baseline.get("findings", {}).keys())
