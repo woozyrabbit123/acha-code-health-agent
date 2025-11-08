@@ -80,8 +80,8 @@ def log_key():
             pytest.fail(f"Patch summary does not match schema: {e}")
 
         # Check that diff file was created
-        diff_path = Path("dist/patch.diff")
-        assert diff_path.exists(), "dist/patch.diff should exist"
+        diff_path = Path("reports/patch.diff")
+        assert diff_path.exists(), "reports/patch.diff should exist"
 
         # Check that workdir was created and contains modified file
         workdir_path = Path("workdir")

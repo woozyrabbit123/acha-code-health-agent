@@ -192,7 +192,8 @@ def test_run_command_creates_artifacts_in_expected_locations():
         dist_dir = Path("dist")
         assert dist_dir.is_dir()
         assert (dist_dir / "release.zip").is_file()
-        assert (dist_dir / "patch.diff").is_file()
+        # patch.diff is now in reports/ directory
+        assert (reports_dir / "patch.diff").is_file()
 
     finally:
         os.chdir(original_cwd)

@@ -37,7 +37,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('src/acha/schemas/*.json', 'acha/schemas'),
-        ('src/acha/templates/*.html', 'acha/templates'),
+        # Note: HTML templates are generated dynamically, no template files needed
     ],
     hiddenimports=[
         'acha.agents.analysis_agent',
