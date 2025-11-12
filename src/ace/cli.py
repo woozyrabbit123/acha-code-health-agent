@@ -965,6 +965,10 @@ def cmd_explain(args):
 
 def main():
     """Main CLI entry point."""
+    # Print personal mode banner
+    if not any(arg in sys.argv for arg in ["--version", "--help", "-h"]):
+        print("[ACE: Personal Mode] All features unlocked — full autonomy enabled.\n")
+
     try:
         parser = argparse.ArgumentParser(
             prog="ace", description="ACE - Autonomous Code Editor v0.2"

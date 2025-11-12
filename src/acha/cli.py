@@ -14,7 +14,7 @@ from acha.agents.refactor_agent import RefactorAgent
 from acha.agents.validation_agent import ValidationAgent
 from acha.baseline import compare_baseline, create_baseline
 from acha.precommit import precommit_command
-from acha.pro_license import is_pro, require_pro
+# Pro license removed - all features unlocked for personal use
 from acha.utils.ast_cache import ASTCache
 from acha.utils.checkpoint import checkpoint, restore
 from acha.utils.exporter import build_proof_pack
@@ -44,20 +44,10 @@ def analyze(args):
     if use_cache:
         cache = ASTCache()
 
-    # Setup parallel execution
+    # Setup parallel execution (fully unlocked)
     parallel = getattr(args, "parallel", False)
     jobs = getattr(args, "jobs", None)
     max_workers = getattr(args, "max_workers", 1)
-
-    # Gate parallel execution as Pro-only (for max_workers > 1)
-    # Community users must use single-threaded execution
-    if not is_pro():
-        # Check if user explicitly requested parallel execution
-        if jobs is not None and jobs > 1:
-            require_pro("Parallel Scanning (--jobs > 1)")
-        if max_workers > 1:
-            # User explicitly requested max_workers > 1 without Pro license
-            require_pro("Parallel Scanning (--max-workers > 1)")
 
     # Use --jobs if specified, otherwise use max_workers
     if jobs is not None:
@@ -84,12 +74,8 @@ def analyze(args):
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
 
-    # Get output format
+    # Get output format (all formats unlocked)
     output_format = getattr(args, "output_format", "json")
-
-    # Gate HTML output as Pro-only
-    if output_format in ["html", "all"] and not is_pro():
-        require_pro("HTML Report Output")
 
     # Always write JSON (required for other tools)
     json_path = reports_dir / "analysis.json"
@@ -151,10 +137,6 @@ def refactor(args):
     apply_changes = getattr(args, "apply", False)
     skip_confirmation = getattr(args, "yes", False)
     force = getattr(args, "force", False)
-
-    # Gate --apply as Pro-only
-    if apply_changes and not is_pro():
-        require_pro("Refactoring with --apply")
 
     # Default behavior: if neither --fix nor --apply is specified, use --fix (plan only)
     if not fix_only and not apply_changes:
@@ -444,12 +426,12 @@ def run_pipeline_command(args, policy=None):
 
     analyze_args = Args()
     analyze_args.target = target_dir
-    # Use "all" for Pro, "sarif" for Community (HTML is Pro-gated)
-    analyze_args.output_format = "all" if is_pro() else "sarif"
+    # All output formats unlocked
+    analyze_args.output_format = "all"
     analyze_args.parallel = True
     analyze_args.cache = True
-    # Use 4 workers for Pro, 1 for Community (default)
-    analyze_args.max_workers = 4 if is_pro() else 1
+    # Full parallel execution unlocked
+    analyze_args.max_workers = 4
     analyze_args.jobs = None
 
     result = analyze(analyze_args)
@@ -614,8 +596,6 @@ def run_pipeline_command(args, policy=None):
 
 def baseline_create_cmd(args):
     """Create baseline from analysis results"""
-    require_pro("Baseline System")
-
     analysis_path = Path(args.analysis)
     if not analysis_path.exists():
         print(f"Error: Analysis file not found: {args.analysis}", file=sys.stderr)
@@ -640,8 +620,6 @@ def baseline_create_cmd(args):
 
 def baseline_compare_cmd(args):
     """Compare current findings against baseline"""
-    require_pro("Baseline System")
-
     analysis_path = Path(args.analysis)
     baseline_path = Path(args.baseline)
 
@@ -702,8 +680,6 @@ def baseline_compare_cmd(args):
 
 def precommit_cmd(args):
     """Run pre-commit scan"""
-    require_pro("Pre-commit Helper")
-
     target_dir = args.target
     baseline_path = args.baseline if hasattr(args, "baseline") else None
 

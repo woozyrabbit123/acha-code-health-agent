@@ -63,8 +63,18 @@ def analyze_github_workflow(file_path: Path | str, content: str) -> list[Unified
         if job_permissions is None and not has_top_level_permissions:
             any_job_without_permissions = True
 
-        # Check for write-all
+        # Check for write-all (both string and nested dict formats)
+        has_write_all = False
         if isinstance(job_permissions, str) and job_permissions == "write-all":
+            has_write_all = True
+        elif isinstance(job_permissions, dict):
+            # Check nested permissions dict for any write-all values
+            for perm_key, perm_value in job_permissions.items():
+                if perm_value == "write-all":
+                    has_write_all = True
+                    break
+
+        if has_write_all:
             findings.append(
                 create_uir(
                     file=file_path_str,
@@ -72,7 +82,7 @@ def analyze_github_workflow(file_path: Path | str, content: str) -> list[Unified
                     rule=RULE_WRITE_ALL,
                     severity=Severity.HIGH,
                     message=f"Job '{job_name}' uses permissions: write-all (overly permissive)",
-                    suggestion="Use minimal permissions: permissions: { contents: read, ... }",
+                    suggestion="Use minimal permissions: permissions: {{ contents: read, ... }}",
                     snippet=f"job: {job_name}",
                 )
             )

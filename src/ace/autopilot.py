@@ -107,6 +107,7 @@ def run_autopilot(cfg: AutopilotConfig) -> tuple[ExitCode, AutopilotStats]:
             cfg.rules,
             incremental=cfg.incremental,
             use_cache=True,
+            deep=cfg.deep,
         )
 
         stats.findings_count = len(findings)

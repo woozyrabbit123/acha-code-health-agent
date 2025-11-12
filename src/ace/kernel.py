@@ -53,6 +53,7 @@ from ace.skills.style import (
 )
 from ace.storage import AnalysisCache, compute_file_hash, compute_ruleset_hash
 from ace.suppressions import filter_findings_by_suppressions, parse_suppressions
+from ace.telemetry import time_block, Telemetry
 from ace.uir import UnifiedIssue
 
 
@@ -65,6 +66,7 @@ def run_analyze(
     jobs: int = 1,
     incremental: bool = False,
     rebuild_index: bool = False,
+    deep: bool = False,
 ) -> list[UnifiedIssue]:
     """
     Run analysis on target path and collect findings.
@@ -78,12 +80,16 @@ def run_analyze(
         jobs: Number of parallel workers (default: 1 for sequential)
         incremental: Only analyze changed files using content index
         rebuild_index: Rebuild content index before analyzing
+        deep: Disable clean-skip heuristic (always run all rules, default: False)
 
     Returns:
         List of UnifiedIssue findings (sorted deterministically)
     """
     profiler = get_profiler()
     profiler.start_phase("analyze")
+
+    # Initialize telemetry for performance tracking
+    telemetry = Telemetry()
 
     # Convert str to Path if needed
     if isinstance(target_path, str):
@@ -149,48 +155,63 @@ def run_analyze(
             # Python rules
             if file_path.suffix == ".py":
                 if should_run_rule("PY-S101-UNSAFE-HTTP"):
-                    file_findings.extend(analyze_py(content, path_str))
+                    with time_block("PY-S101-UNSAFE-HTTP", telemetry):
+                        file_findings.extend(analyze_py(content, path_str))
                 if should_run_rule("PY-E201-BROAD-EXCEPT"):
-                    file_findings.extend(analyze_broad_except(content, path_str))
+                    with time_block("PY-E201-BROAD-EXCEPT", telemetry):
+                        file_findings.extend(analyze_broad_except(content, path_str))
                 if should_run_rule("PY-I101-IMPORT-SORT"):
-                    file_findings.extend(analyze_import_sort(content, path_str))
+                    with time_block("PY-I101-IMPORT-SORT", telemetry):
+                        file_findings.extend(analyze_import_sort(content, path_str))
                 if should_run_rule("PY-S201-SUBPROCESS-CHECK"):
-                    file_findings.extend(analyze_subprocess_check(content, path_str))
+                    with time_block("PY-S201-SUBPROCESS-CHECK", telemetry):
+                        file_findings.extend(analyze_subprocess_check(content, path_str))
                 if should_run_rule("PY-S202-SUBPROCESS-SHELL"):
-                    file_findings.extend(analyze_subprocess_shell(content, path_str))
+                    with time_block("PY-S202-SUBPROCESS-SHELL", telemetry):
+                        file_findings.extend(analyze_subprocess_shell(content, path_str))
                 if should_run_rule("PY-S203-SUBPROCESS-STRING-CMD"):
-                    file_findings.extend(analyze_subprocess_string_cmd(content, path_str))
+                    with time_block("PY-S203-SUBPROCESS-STRING-CMD", telemetry):
+                        file_findings.extend(analyze_subprocess_string_cmd(content, path_str))
                 if should_run_rule("PY-S310-TRAILING-WS"):
-                    file_findings.extend(analyze_trailing_whitespace(content, path_str))
+                    with time_block("PY-S310-TRAILING-WS", telemetry):
+                        file_findings.extend(analyze_trailing_whitespace(content, path_str))
                 if should_run_rule("PY-S311-EOF-NL"):
-                    file_findings.extend(analyze_eof_newline(content, path_str))
+                    with time_block("PY-S311-EOF-NL", telemetry):
+                        file_findings.extend(analyze_eof_newline(content, path_str))
                 if should_run_rule("PY-S312-BLANKLINES"):
-                    file_findings.extend(analyze_excessive_blanklines(content, path_str))
+                    with time_block("PY-S312-BLANKLINES", telemetry):
+                        file_findings.extend(analyze_excessive_blanklines(content, path_str))
                 if should_run_rule("PY-Q201-ASSERT-IN-NONTEST"):
-                    file_findings.extend(analyze_assert_in_nontest(content, path_str))
+                    with time_block("PY-Q201-ASSERT-IN-NONTEST", telemetry):
+                        file_findings.extend(analyze_assert_in_nontest(content, path_str))
                 if should_run_rule("PY-Q202-PRINT-IN-SRC"):
-                    file_findings.extend(analyze_print_in_src(content, path_str))
+                    with time_block("PY-Q202-PRINT-IN-SRC", telemetry):
+                        file_findings.extend(analyze_print_in_src(content, path_str))
                 if should_run_rule("PY-Q203-EVAL-EXEC"):
-                    file_findings.extend(analyze_eval_exec(content, path_str))
+                    with time_block("PY-Q203-EVAL-EXEC", telemetry):
+                        file_findings.extend(analyze_eval_exec(content, path_str))
 
             # Markdown rules
             elif file_path.suffix == ".md":
                 if should_run_rule("MD-S001-DANGEROUS-COMMAND"):
-                    file_findings.extend(
-                        analyze_markdown_dangerous_commands(content, path_str)
-                    )
+                    with time_block("MD-S001-DANGEROUS-COMMAND", telemetry):
+                        file_findings.extend(
+                            analyze_markdown_dangerous_commands(content, path_str)
+                        )
 
             # YAML rules
             elif file_path.suffix in {".yml", ".yaml"}:
                 if should_run_rule("YML-F001-DUPLICATE-KEY"):
-                    file_findings.extend(analyze_yaml_duplicate_keys(content, path_str))
+                    with time_block("YML-F001-DUPLICATE-KEY", telemetry):
+                        file_findings.extend(analyze_yaml_duplicate_keys(content, path_str))
 
             # Shell rules
             elif file_path.suffix == ".sh" or (
                 file_path.suffix == "" and content.startswith("#!")
             ):
                 if should_run_rule("SH-S001-MISSING-STRICT-MODE"):
-                    file_findings.extend(analyze_shell_strict_mode(content, path_str))
+                    with time_block("SH-S001-MISSING-STRICT-MODE", telemetry):
+                        file_findings.extend(analyze_shell_strict_mode(content, path_str))
 
             # Filter out suppressed findings
             file_findings = filter_findings_by_suppressions(file_findings, suppressions)
