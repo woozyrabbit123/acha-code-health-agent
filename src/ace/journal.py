@@ -22,7 +22,7 @@ class JournalIntent:
     before_size: int
     rule_ids: list[str]
     plan_id: str
-    pre_image: str  # First 4KB of original content for verification
+    pre_image: str  # Full original content for restore
 
 
 @dataclass
@@ -93,7 +93,7 @@ class Journal:
             before_size: Size in bytes before modification
             rule_ids: Rule IDs triggering this modification
             plan_id: Plan identifier
-            pre_image: First 4KB of original content (for restore verification)
+            pre_image: Full original content for restore (no truncation)
         """
         entry = {
             "type": "intent",
@@ -103,7 +103,7 @@ class Journal:
             "before_size": before_size,
             "rule_ids": sorted(rule_ids),
             "plan_id": plan_id,
-            "pre_image": pre_image.decode("utf-8", errors="surrogateescape")[:4096]
+            "pre_image": pre_image.decode("utf-8", errors="surrogateescape")  # Full content
         }
         self._append(entry)
 
@@ -258,7 +258,7 @@ def build_revert_plan(journal_path: Path) -> list[RevertContext]:
             intent = mods["intent"]
             success = mods["success"]
 
-            # Read pre_image from intent (first 4KB stored)
+            # Read full pre_image from intent (no truncation)
             pre_image_str = intent.get("pre_image", "")
             restore_content = pre_image_str.encode("utf-8", errors="surrogateescape")
 
