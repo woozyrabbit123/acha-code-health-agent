@@ -314,9 +314,23 @@ def guard_python_edit(
     # If hashes differ but AST equivalence and symbol counts passed,
     # this indicates a potentially problematic transformation
     if hash_before and hash_after and hash_before != hash_after:
-        # This is actually expected for most transformations
-        # Only flag if we claimed AST equivalence but hashes differ
-        pass  # Currently informational only
+        # In strict mode, enforce AST hash equality to detect semantic tampering
+        # that might bypass AST equivalence checks through CST-only transforms
+        if strict:
+            return GuardResult(
+                passed=False,
+                file=file_path_str,
+                before_content=before_content,
+                after_content=after_content,
+                errors=[
+                    f"AST hash mismatch detected (potential semantic tampering): "
+                    f"before={hash_before[:16]}... after={hash_after[:16]}..."
+                ],
+                guard_type="ast_hash",
+                ast_hash_before=hash_before,
+                ast_hash_after=hash_after,
+            )
+        # In non-strict mode, log but allow (may be expected for formatting/comment changes)
 
     # Layer 3: CST roundtrip
     cst_ok, cst_errors = verify_cst_roundtrip(after_content)

@@ -17,6 +17,7 @@ Commands:
 """
 
 import json
+import shutil
 import subprocess
 import sys
 import webbrowser
@@ -375,28 +376,36 @@ class ACEDashboard(App[None]):
         status.update_status("Running analysis...")
 
         try:
-            # Run ace analyze and capture output
+            # Resolve executable path explicitly for security
+            ace_exe = shutil.which("ace")
+            if not ace_exe:
+                status.update_status("Error: ace executable not found in PATH")
+                return
+
+            # Run ace analyze with check=True to raise on failure
             result = subprocess.run(
-                ["ace", "analyze", "."],
+                [ace_exe, "analyze", "."],
                 capture_output=True,
                 text=True,
                 timeout=30,
+                check=True,  # Raise CalledProcessError on non-zero exit
             )
 
-            if result.returncode == 0:
-                # Save findings
-                findings_file = Path(".ace/last_findings.json")
-                findings_file.parent.mkdir(parents=True, exist_ok=True)
-                findings_file.write_text(result.stdout)
+            # Save findings
+            findings_file = Path(".ace/last_findings.json")
+            findings_file.parent.mkdir(parents=True, exist_ok=True)
+            findings_file.write_text(result.stdout)
 
-                # Refresh panels
-                self.action_refresh_all()
-                status.update_status("Analysis complete")
-            else:
-                status.update_status(f"Analysis failed: {result.stderr[:50]}")
+            # Refresh panels
+            self.action_refresh_all()
+            status.update_status("Analysis complete")
 
         except subprocess.TimeoutExpired:
             status.update_status("Analysis timed out")
+        except subprocess.CalledProcessError as e:
+            # Handle non-zero exit codes from ace analyze
+            error_msg = e.stderr[:50] if e.stderr else f"Exit code {e.returncode}"
+            status.update_status(f"Analysis failed: {error_msg}")
         except Exception as e:
             status.update_status(f"Error: {str(e)[:50]}")
 

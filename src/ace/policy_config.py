@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ace.policy import DEFAULT_ALPHA, DEFAULT_BETA, AUTO_THRESHOLD, SUGGEST_THRESHOLD
+
 # Python 3.11+ has tomllib built-in, earlier versions need tomli
 if sys.version_info >= (3, 11):
     import tomllib
@@ -46,12 +48,12 @@ class PolicyConfig:
     version: str = "0.7.0"
     description: str = "ACE policy configuration"
 
-    # Scoring
-    alpha: float = 0.7
-    beta: float = 0.3
+    # Scoring - defaults imported from policy.py to avoid duplication
+    alpha: float = DEFAULT_ALPHA  # 0.7
+    beta: float = DEFAULT_BETA  # 0.3
     gamma: float = 0.2
-    auto_threshold: float = 0.70
-    suggest_threshold: float = 0.50
+    auto_threshold: float = AUTO_THRESHOLD  # 0.70
+    suggest_threshold: float = SUGGEST_THRESHOLD  # 0.50
 
     # Limits
     max_findings: int = 0
@@ -194,12 +196,12 @@ def load_policy_config(policy_path: Path | str | None = None) -> PolicyConfig:
     policy = PolicyConfig(
         version=meta.get("version", "0.7.0"),
         description=meta.get("description", "ACE policy configuration"),
-        # Scoring
-        alpha=scoring.get("alpha", 0.7),
-        beta=scoring.get("beta", 0.3),
+        # Scoring - use shared constants from policy.py
+        alpha=scoring.get("alpha", DEFAULT_ALPHA),
+        beta=scoring.get("beta", DEFAULT_BETA),
         gamma=scoring.get("gamma", 0.2),
-        auto_threshold=scoring.get("auto_threshold", 0.70),
-        suggest_threshold=scoring.get("suggest_threshold", 0.50),
+        auto_threshold=scoring.get("auto_threshold", AUTO_THRESHOLD),
+        suggest_threshold=scoring.get("suggest_threshold", SUGGEST_THRESHOLD),
         # Limits
         max_findings=limits.get("max_findings", 0),
         fail_on_critical=limits.get("fail_on_critical", True),

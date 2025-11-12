@@ -10,7 +10,8 @@ import json
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Literal, Optional
-import time
+
+from ace.safety import atomic_write
 
 
 @dataclass
@@ -167,22 +168,20 @@ class RepoMap:
 
     def save(self, path: Path) -> None:
         """
-        Save symbol index to JSON file with deterministic ordering.
+        Save symbol index to JSON file with deterministic ordering and atomic writes.
 
         Args:
             path: Output file path (e.g., .ace/symbols.json)
         """
-        path.parent.mkdir(parents=True, exist_ok=True)
-
         data = {
             "root": str(self.root) if self.root else None,
             "symbols": [s.to_dict() for s in self.symbols],
-            "generated_at": int(time.time())
+            # Timestamp removed for deterministic builds - metadata can be tracked externally
         }
 
-        # Write with sorted keys for determinism
-        with path.open('w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, sort_keys=True)
+        # Write with sorted keys for determinism and atomic write for durability
+        content = json.dumps(data, indent=2, sort_keys=True).encode('utf-8')
+        atomic_write(path, content)
 
     @classmethod
     def load(cls, path: Path) -> "RepoMap":

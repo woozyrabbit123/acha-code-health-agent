@@ -36,15 +36,18 @@ class ContextRanker:
     files for analysis or context loading.
     """
 
-    def __init__(self, repo_map: RepoMap):
+    def __init__(self, repo_map: RepoMap, current_time: Optional[int] = None):
         """
         Initialize context ranker.
 
         Args:
             repo_map: RepoMap instance with symbols
+            current_time: Fixed timestamp for deterministic ranking (defaults to current time)
         """
         self.repo_map = repo_map
         self._file_cache: dict[str, FileScore] = {}
+        # Store timestamp for deterministic ranking; use current time if not provided
+        self._current_time = current_time if current_time is not None else int(time.time())
 
     def rank_files(
         self,
@@ -193,7 +196,8 @@ class ContextRanker:
 
         # Get most recent mtime
         max_mtime = max(s.mtime for s in symbols)
-        current_time = int(time.time())
+        # Use stored timestamp for deterministic ranking
+        current_time = self._current_time
 
         # Calculate days since modification
         seconds_since = max(current_time - max_mtime, 1)

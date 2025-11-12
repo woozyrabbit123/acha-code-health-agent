@@ -934,6 +934,7 @@ def cmd_commitmsg(args):
     try:
         from ace.llm import get_assist
         import subprocess
+        import shutil
 
         assist = get_assist()
 
@@ -942,17 +943,28 @@ def cmd_commitmsg(args):
         if args.from_diff:
             # Get diff from git
             try:
+                # Resolve git executable path explicitly for security
+                git_exe = shutil.which("git")
+                if not git_exe:
+                    print("Error: git executable not found in PATH", file=sys.stderr)
+                    return ExitCode.OPERATIONAL_ERROR
+
                 result = subprocess.run(
-                    ["git", "diff", "--cached"],
+                    [git_exe, "diff", "--cached"],
                     capture_output=True,
                     text=True,
                     timeout=10,
+                    check=True,  # Raise CalledProcessError on non-zero exit
                 )
-                if result.returncode == 0:
-                    diff = result.stdout
-                else:
-                    print("Error: git diff failed", file=sys.stderr)
-                    return ExitCode.OPERATIONAL_ERROR
+                diff = result.stdout
+
+            except subprocess.CalledProcessError as e:
+                error_msg = e.stderr if e.stderr else f"Exit code {e.returncode}"
+                print(f"Error: git diff failed: {error_msg}", file=sys.stderr)
+                return ExitCode.OPERATIONAL_ERROR
+            except subprocess.TimeoutExpired:
+                print("Error: git diff timed out", file=sys.stderr)
+                return ExitCode.OPERATIONAL_ERROR
             except Exception as e:
                 print(f"Error running git diff: {e}", file=sys.stderr)
                 return ExitCode.OPERATIONAL_ERROR
