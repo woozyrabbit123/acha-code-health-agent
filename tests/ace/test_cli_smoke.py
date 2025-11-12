@@ -2,6 +2,7 @@
 
 import subprocess
 import sys
+import tempfile
 
 
 def test_cli_help():
@@ -42,42 +43,48 @@ def test_cli_version():
 
 
 def test_analyze_stub():
-    """Test that ace analyze prints stub message."""
-    result = subprocess.run(
-        [sys.executable, "-m", "ace.cli", "analyze"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    """Test that ace analyze works with empty directory."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = subprocess.run(
+            [sys.executable, "-m", "ace.cli", "analyze", "--target", tmpdir],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
-    assert result.returncode == 0, f"Expected exit 0, got {result.returncode}"
-    assert "ACE v0.1 stub: analyze" in result.stdout
+        assert result.returncode == 0, f"Expected exit 0, got {result.returncode}"
+        # Empty directory should return empty JSON array
+        assert result.stdout.strip() == "[]"
 
 
 def test_refactor_stub():
-    """Test that ace refactor prints stub message."""
-    result = subprocess.run(
-        [sys.executable, "-m", "ace.cli", "refactor"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    """Test that ace refactor works with empty directory."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = subprocess.run(
+            [sys.executable, "-m", "ace.cli", "refactor", "--target", tmpdir],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
-    assert result.returncode == 0, f"Expected exit 0, got {result.returncode}"
-    assert "ACE v0.1 stub: refactor" in result.stdout
+        assert result.returncode == 0, f"Expected exit 0, got {result.returncode}"
+        # Empty directory should return empty JSON array
+        assert result.stdout.strip() == "[]"
 
 
 def test_validate_stub():
-    """Test that ace validate prints stub message."""
-    result = subprocess.run(
-        [sys.executable, "-m", "ace.cli", "validate"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    """Test that ace validate works with empty directory."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = subprocess.run(
+            [sys.executable, "-m", "ace.cli", "validate", "--target", tmpdir],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
-    assert result.returncode == 0, f"Expected exit 0, got {result.returncode}"
-    assert "ACE v0.1 stub: validate" in result.stdout
+        assert result.returncode == 0, f"Expected exit 0, got {result.returncode}"
+        # Empty directory should return empty JSON array
+        assert result.stdout.strip() == "[]"
 
 
 def test_export_stub():
@@ -94,13 +101,15 @@ def test_export_stub():
 
 
 def test_apply_stub():
-    """Test that ace apply prints stub message."""
-    result = subprocess.run(
-        [sys.executable, "-m", "ace.cli", "apply"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    """Test that ace apply works with empty directory."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = subprocess.run(
+            [sys.executable, "-m", "ace.cli", "apply", "--target", tmpdir],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
-    assert result.returncode == 0, f"Expected exit 0, got {result.returncode}"
-    assert "ACE v0.1 stub: apply" in result.stdout
+        assert result.returncode == 0, f"Expected exit 0, got {result.returncode}"
+        # Empty directory should print success message
+        assert "Refactoring applied successfully" in result.stdout
