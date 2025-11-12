@@ -5,6 +5,237 @@ All notable changes to the ACHA/ACE (Autonomous Code-Health Agent / Autonomous C
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [ACE 2.0.0] - 2025-01-12
+
+### Added - Planner v1
+
+- **Deterministic action prioritization system** (`src/ace/planner.py`)
+  - Multi-factor priority formula: `priority = 100*R★ + 20*cohesion - cost_rank - revert_penalty + context_boost + success_rate_bonus`
+  - Replaces ad-hoc priority calculation in autopilot
+  - Generates human-readable rationales for all actions
+  - Integrates with Learning, Telemetry, and Context Engine
+  - Fully deterministic (ties broken by plan.id)
+
+- **Priority Components**:
+  - **Base priority**: 100 * R★ (estimated risk score)
+  - **Cohesion bonus**: +20 for multiple issues in same file
+  - **Cost penalty**: Ranked by telemetry p95 latency
+  - **Revert penalty**: -20 for contexts with high revert history
+  - **Context boost**: +0-50 based on RepoMap symbol importance
+  - **Success rate bonus**: +0-10 based on learning success rate
+
+- **Rationale logging** in autopilot output:
+  - Shows top 5 actions with priorities and explanations
+  - Example: `R★=0.85 (base=85.0), cohesion=20, context_boost=+12.3, total=123.3`
+
+### Added - LLM Assist
+
+- **Optional language model assistance** (`src/ace/llm.py`)
+  - Works fully offline by default (no network required)
+  - Budget-limited to prevent runaway costs (max 4 calls, 100 tokens each)
+  - Aggressive caching to `.ace/llm_cache.json`
+
+- **Provider abstraction**:
+  - `NullProvider`: Heuristic fallbacks (default, no network)
+  - `OllamaProvider`: Local Ollama integration (optional, requires `OLLAMA_HOST` env var)
+  - Auto-detection: Ollama if available, else NullProvider
+
+- **Utilities**:
+  - `docstring_one_liner()`: Generate docstrings from function signatures
+  - `suggest_name()`: Suggest better variable/function names
+  - `summarize_diff()`: Summarize git diffs for commit messages
+
+- **CLI commands**:
+  - `ace assist docstring <file>:<line>`: Generate docstring
+  - `ace assist name <file>:<start>-<end>`: Suggest better name
+  - `ace commitmsg --from-diff`: Generate commit message from staged diff
+
+- **Budget enforcement**:
+  - Max 4 LLM calls per run
+  - 100 token limit per call
+  - Falls back to heuristics when budget exceeded
+
+- **Caching**:
+  - Content fingerprinting with SHA256
+  - Persists to `.ace/llm_cache.json`
+  - Makes repeated calls instant
+
+### Added - Local CI
+
+- **`ace check --strict` command** for CI-like local gating
+  - Analyzes code and fails (exit code 3) if any findings in strict mode
+  - Non-strict mode: warnings only (exit code 0)
+  - Ideal for pre-push checks or local CI validation
+
+### Changed
+
+- **Autopilot** now uses Planner v1 for action prioritization (lines 240-264 in `src/ace/autopilot.py`)
+  - Removed inline cost-based sorting
+  - Added rationale logging for top 5 actions
+  - More strategic ordering based on multiple factors
+
+- **Pre-commit installation** is now **idempotent** (`cmd_install_pre_commit`)
+  - Detects existing ACE hook and skips if identical
+  - Updates if ACE hook exists with different version
+  - Appends to existing non-ACE hooks instead of overwriting
+  - Reports status clearly: "already installed", "updated", or "appended"
+
+### Documentation
+
+- Added `docs/PLANNER.md`: Complete guide to Planner v1 with formula breakdown
+- Added `docs/ASSIST.md`: LLM assist usage, providers, and examples
+
+### Migration Guide v1.7 → v2.0
+
+No breaking changes. New features are additive:
+
+1. **Planner v1** is automatically used in `ace autopilot`
+   - No config changes needed
+   - Observe new rationale logging in output
+
+2. **LLM Assist** is opt-in:
+   - Works immediately with NullProvider (heuristics)
+   - To use Ollama: `export OLLAMA_HOST=http://localhost:11434`
+
+3. **`ace check --strict`** is a new command:
+   - Add to CI: `ace check --strict --target .` (fails on any findings)
+
+4. **Pre-commit** is now idempotent:
+   - Run `ace install-pre-commit` multiple times safely
+
+---
+
+## [ACE 1.7.0] - 2025-01-12
+
+### Added - Learning v2
+
+- **Per-rule adaptive thresholds** with enhanced tracking (`src/ace/learn.py`)
+  - `success_rate()`: Applied / (Applied + Reverted)
+  - `revert_rate()`: Reverted / (Applied + Reverted)
+  - `sample_size()`: Minimum 5 samples required for threshold tuning
+  - Weekly decay (0.8 multiplier) for time-weighted statistics
+
+- **Auto-skiplist patterns**:
+  - Triggered after **3 consecutive reverts** for (rule, file) pair
+  - Prevents ACE from repeatedly suggesting problematic fixes
+  - Persisted to `learn.json` with rule-specific skiplist entries
+
+- **Tuned thresholds**:
+  - Dynamically adjusted based on rule performance
+  - High revert rate (>25%): +0.05 threshold (more conservative)
+  - High success rate (>80%): -0.05 threshold (more aggressive)
+  - Clamped to [0.60, 0.85] range
+
+- **CLI commands**:
+  - `ace learn show`: Display learning statistics and tuned thresholds
+  - `ace learn reset`: Clear all learning history
+
+### Added - Telemetry v2
+
+- **Enhanced JSONL logging** (`src/ace/telemetry.py`)
+  - Extended metadata: `{rule_id, ms, files, ok, reverted, timestamp}`
+  - P95 percentile calculation for tail latency tracking
+  - Time-filtered aggregation with `--days N` option
+
+- **Summary statistics**:
+  - Mean execution time per rule
+  - P95 (95th percentile) for performance regression detection
+  - Execution count per rule
+  - Success/failure tracking
+
+- **CLI commands**:
+  - `ace telemetry summary --days 7`: View performance summary
+  - Identifies slowest rules by p95 latency
+
+- **Integration**:
+  - Automatic instrumentation in kernel (`run_analyze`, `run_apply`)
+  - Used for cost-based prioritization in autopilot
+  - Tracks PatchGuard revert events
+
+### Added - Risk Heatmap
+
+- **Per-file risk calculation** (`src/ace/report.py`)
+  - Weighted formula: `risk = 0.4*revert_rate + 0.3*churn + 0.3*slow_rules`
+  - Identifies high-risk files for focused review
+  - Persisted to `.ace/metrics.json` with timeseries data
+
+- **Static HTML report**:
+  - `ace report health --target .` generates `health.html`
+  - Inline CSS/JS (no external dependencies)
+  - Risk heatmap visualization with color-coded bars
+  - Findings summary and metrics dashboard
+
+- **Risk metrics**:
+  - Revert rate weight (0-0.4): Files with high PatchGuard revert history
+  - Churn weight (0-0.3): Files with many issues
+  - Slow rules weight (0-0.3): Files affected by slow-performing rules
+
+### Added - TUI Dashboard
+
+- **Interactive terminal UI** using Textual framework (`src/ace/tui/`)
+  - Real-time monitoring of ACE operations
+  - Multiple panels: Watch, Journal, Findings, Risk Heatmap, Status
+
+- **Key bindings**:
+  - `w`: Toggle watch mode (auto-refresh)
+  - `a`: Run analysis
+  - `r`: Refresh all panels
+  - `h`: Open health report in browser
+  - `q`: Quit
+
+- **Panels**:
+  - **WatchPanel**: Live updates when files change
+  - **JournalPanel**: Recent refactoring history from `.ace/journal.jsonl`
+  - **FindingsPanel**: Current issues with severity and file location
+  - **RiskHeatmapPanel**: Visual risk bars for high-risk files
+  - **StatusPanel**: System status and key bindings
+
+- **CLI commands**:
+  - `ace ui`: Launch TUI dashboard
+
+### Changed
+
+- **Autopilot** now uses Learning v2 for:
+  - Auto-skiplist filtering (lines 166-171)
+  - Success rate bonus in priority calculation
+  - Outcome recording with file_path for skiplist
+
+- **Kernel** now instruments telemetry in `run_apply`:
+  - Records duration, files, success/failure, and revert events
+  - Integrates with PatchGuard for revert tracking
+
+### Documentation
+
+- Added `docs/LEARNING.md`: Complete guide to Learning v2
+- Added `docs/TELEMETRY.md`: Telemetry v2 usage and API
+- Added `docs/TUI.md`: TUI dashboard guide with screenshots
+
+### Dependencies
+
+- Added `textual>=0.41.0` for TUI dashboard
+
+### Migration Guide v1.6 → v1.7
+
+No breaking changes. New features are additive:
+
+1. **Learning v2** automatically loads from `.ace/learn.json`
+   - Existing learning data is compatible
+   - New fields added: `consecutive_reverts`, `last_updated`
+
+2. **Telemetry v2** writes to `.ace/telemetry.jsonl`
+   - Existing telemetry data is compatible
+   - New fields added: `files`, `ok`, `reverted`
+
+3. **TUI** requires `textual>=0.41.0`:
+   - Run `pip install -e .` to update dependencies
+   - Launch with `ace ui`
+
+4. **Risk Heatmap** uses existing telemetry and learning data:
+   - No migration needed
+   - Generate report: `ace report health --target .`
+
+---
+
 ## [ACE 1.6.0] - 2025-01-12
 
 ### Added

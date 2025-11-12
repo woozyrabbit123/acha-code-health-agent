@@ -237,89 +237,31 @@ def run_autopilot(cfg: AutopilotConfig) -> tuple[ExitCode, AutopilotStats]:
                 print(f"✓ No plans approved by policy (denied: {stats.policy_denied})")
             return (ExitCode.SUCCESS, stats)
 
-        # Step 8: Sort plans by priority using smart prioritization
-        # priority = (R★ * 100) - cost_ms_rank - revisit_penalty
+        # Step 8: Use Planner v1 to prioritize actions with rationales
+        # v2.0: Replaced inline priority calculation with Planner v1
+        from ace.planner import Planner, PlannerConfig
 
-        # Get all unique rule IDs from approved plans
-        all_rule_ids = []
-        for plan in approved_plans:
-            all_rule_ids.extend(get_rule_ids_from_plan(plan))
-        all_rule_ids = list(set(all_rule_ids))
+        if not cfg.silent:
+            print(f"Planning actions with Planner v1...")
 
-        # Get cost ranking from telemetry
-        cost_ranks = get_cost_ms_rank(all_rule_ids)
+        planner_config = PlannerConfig(
+            target=cfg.target,
+            use_context_engine=CONTEXT_ENGINE_AVAILABLE and repo_map is not None,
+            use_learning=True,
+            use_telemetry=True,
+        )
+        planner = Planner(planner_config)
+        actions = planner.plan_actions(approved_plans)
 
-        # Calculate priority for each plan
-        def calculate_priority(plan):
-            rule_ids = get_rule_ids_from_plan(plan)
+        # Log action rationales
+        if not cfg.silent and actions:
+            print(f"\nPlanned {len(actions)} action(s):\n")
+            for i, action in enumerate(actions[:5], 1):  # Show top 5
+                print(f"  {i}. {action.plan.id} (priority={action.priority:.1f})")
+                print(f"     Rationale: {action.rationale}")
 
-            # Base priority from risk score
-            base_priority = plan.estimated_risk * 100
-
-            # Cost penalty (average rank of rules in plan)
-            cost_penalty = 0.0
-            if rule_ids:
-                cost_penalty = sum(cost_ranks.get(rid, 0) for rid in rule_ids) / len(rule_ids)
-
-            # Revisit penalty (check if context was reverted recently)
-            revisit_penalty = 0.0
-            ctx_key = context_key(plan)
-            if learning.should_skip_context(ctx_key, threshold=0.5):
-                revisit_penalty = 20.0  # Significant penalty for previously reverted contexts
-
-            # v1.5: Context ranking boost
-            context_boost = 0.0
-            if context_ranker and hasattr(plan, 'edits') and plan.edits:
-                # Get files affected by this plan
-                affected_files = list(set(edit.file_path for edit in plan.edits))
-
-                # Score each file
-                total_score = 0.0
-                for file_path in affected_files:
-                    # Try to get relative path
-                    try:
-                        rel_path = str(Path(file_path).relative_to(cfg.target))
-                    except ValueError:
-                        rel_path = str(file_path)
-
-                    # Get file symbols and calculate density/recency
-                    file_symbols = repo_map.get_file_symbols(rel_path)
-                    if file_symbols:
-                        # Use ranker's scoring components
-                        file_score = context_ranker._score_file(
-                            rel_path,
-                            query=None,
-                            recency_weight=0.3,
-                            density_weight=0.5,
-                            relevance_weight=0.0
-                        )
-                        if file_score:
-                            total_score += file_score.score
-
-                # Average boost across files (weight 0.2 to avoid dominating)
-                if affected_files:
-                    context_boost = (total_score / len(affected_files)) * 5.0  # Scale up to ~5 points max
-
-            # v1.7: Success rate bonus (prefer high-success rules)
-            success_rate_bonus = 0.0
-            if rule_ids:
-                success_rates = []
-                for rule_id in rule_ids:
-                    if rule_id in learning.data.rules:
-                        stats_obj = learning.data.rules[rule_id]
-                        if stats_obj.sample_size() >= 5:  # Only consider rules with enough samples
-                            success_rates.append(stats_obj.success_rate())
-
-                if success_rates:
-                    avg_success_rate = sum(success_rates) / len(success_rates)
-                    success_rate_bonus = avg_success_rate * 10.0  # Scale to ~10 points max
-
-            priority = base_priority - cost_penalty - revisit_penalty + context_boost + success_rate_bonus
-
-            return priority
-
-        # Sort by priority descending, then by plan ID for determinism
-        approved_plans.sort(key=lambda p: (-calculate_priority(p), p.id))
+        # Extract ordered plans from actions
+        approved_plans = [action.plan for action in actions]
 
         # Step 9: Enforce change budget
         if cfg.max_files or cfg.max_lines:
