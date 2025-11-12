@@ -14,6 +14,7 @@ from ace.errors import ACEError, ExitCode, OperationalError
 from ace.index import ContentIndex, is_indexable
 from ace.journal import Journal
 from ace.kernel import run_analyze, run_apply, run_refactor
+from ace.learn import LearningEngine, context_key, get_rule_ids_from_plan
 from ace.policy import PolicyEngine
 from ace.receipts import Receipt
 from ace.skiplist import Skiplist
@@ -69,6 +70,10 @@ def run_autopilot(cfg: AutopilotConfig) -> tuple[ExitCode, AutopilotStats]:
         # Step 2: Load or initialize supporting files
         skiplist = Skiplist()
         skiplist.load()
+
+        # Initialize learning engine
+        learning = LearningEngine()
+        learning.load()
 
         # Initialize content index for incremental analysis
         index = ContentIndex()
@@ -138,19 +143,39 @@ def run_autopilot(cfg: AutopilotConfig) -> tuple[ExitCode, AutopilotStats]:
             # Plans come with estimated_risk already set
             risk_score = plan.estimated_risk
 
+            # Get tuned thresholds from learning for this plan's rules
+            # Use the first rule's tuned thresholds (if plan has multiple rules, they likely have similar thresholds)
+            rule_ids = get_rule_ids_from_plan(plan)
+            if rule_ids:
+                tuned_auto, tuned_suggest = learning.tuned_thresholds(rule_ids[0])
+            else:
+                tuned_auto, tuned_suggest = (policy.auto_threshold, policy.suggest_threshold)
+
             # Apply policy threshold
             if cfg.allow_mode == "auto":
-                # Auto mode: approve if R* >= 0.70
-                if risk_score >= policy.auto_threshold:
+                # Auto mode: approve if R* >= tuned auto threshold
+                if risk_score >= tuned_auto:
                     approved_plans.append(plan)
                 else:
                     stats.policy_denied += 1
+                    # Learning: Record as skipped (failed policy threshold)
+                    ctx_key = context_key(plan)
+                    for rule_id in rule_ids:
+                        learning.record_outcome(rule_id, "skipped", ctx_key)
             elif cfg.allow_mode == "suggest":
-                # Suggest mode: approve if R* >= 0.50
-                if risk_score >= policy.suggest_threshold:
+                # Suggest mode: approve if R* >= tuned suggest threshold
+                if risk_score >= tuned_suggest:
                     approved_plans.append(plan)
+                    # Learning: Record as suggested (approved but not auto-applied)
+                    ctx_key = context_key(plan)
+                    for rule_id in rule_ids:
+                        learning.record_outcome(rule_id, "suggested", ctx_key)
                 else:
                     stats.policy_denied += 1
+                    # Learning: Record as skipped (failed policy threshold)
+                    ctx_key = context_key(plan)
+                    for rule_id in rule_ids:
+                        learning.record_outcome(rule_id, "skipped", ctx_key)
 
         stats.plans_approved = len(approved_plans)
 
