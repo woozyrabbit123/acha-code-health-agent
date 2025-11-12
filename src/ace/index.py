@@ -18,6 +18,7 @@ class FileEntry:
     size: int
     mtime: float  # Modification time (seconds since epoch)
     sha256: str  # Hex digest (no prefix)
+    clean_runs_count: int = 0  # Number of consecutive clean runs (no changes)
 
 
 class ContentIndex:
@@ -48,7 +49,8 @@ class ContentIndex:
                     path=entry_dict["path"],
                     size=entry_dict["size"],
                     mtime=entry_dict["mtime"],
-                    sha256=entry_dict["sha256"]
+                    sha256=entry_dict["sha256"],
+                    clean_runs_count=entry_dict.get("clean_runs_count", 0)
                 )
         except (json.JSONDecodeError, KeyError, OSError):
             # If index is corrupted, start fresh
@@ -66,7 +68,8 @@ class ContentIndex:
                 "path": entry.path,
                 "size": entry.size,
                 "mtime": entry.mtime,
-                "sha256": entry.sha256
+                "sha256": entry.sha256,
+                "clean_runs_count": entry.clean_runs_count
             }
 
         # Write with deterministic formatting
@@ -74,7 +77,7 @@ class ContentIndex:
             json.dump(data, f, indent=2, sort_keys=True)
             f.write("\n")  # Trailing newline
 
-    def add_file(self, file_path: Path) -> FileEntry:
+    def add_file(self, file_path: Path, preserve_clean_runs: bool = False) -> FileEntry:
         """
         Add or update file entry in index.
 
@@ -82,6 +85,7 @@ class ContentIndex:
 
         Args:
             file_path: Path to file to index
+            preserve_clean_runs: If True and file exists, preserve clean_runs_count
 
         Returns:
             FileEntry for the file
@@ -96,12 +100,20 @@ class ContentIndex:
         # Get file stats
         stat = file_path.stat()
 
+        # Get existing clean_runs_count if preserving
+        clean_runs = 0
+        if preserve_clean_runs:
+            path_str = str(file_path)
+            if path_str in self.entries:
+                clean_runs = self.entries[path_str].clean_runs_count
+
         # Create entry
         entry = FileEntry(
             path=str(file_path),
             size=stat.st_size,
             mtime=stat.st_mtime,
-            sha256=sha256
+            sha256=sha256,
+            clean_runs_count=clean_runs
         )
 
         # Store in index
@@ -204,6 +216,51 @@ class ContentIndex:
             "total_files": total_files,
             "total_size": total_size
         }
+
+    def increment_clean_runs(self, file_path: Path) -> None:
+        """
+        Increment clean runs count for a file.
+
+        Args:
+            file_path: Path to file
+        """
+        path_str = str(file_path)
+        if path_str in self.entries:
+            self.entries[path_str].clean_runs_count += 1
+
+    def reset_clean_runs(self, file_path: Path) -> None:
+        """
+        Reset clean runs count for a file (e.g., when file changes).
+
+        Args:
+            file_path: Path to file
+        """
+        path_str = str(file_path)
+        if path_str in self.entries:
+            self.entries[path_str].clean_runs_count = 0
+
+    def should_skip_deep_scan(self, file_path: Path, threshold: int = 3) -> bool:
+        """
+        Check if file should skip deep scan based on clean-skip heuristic.
+
+        Files with >= threshold consecutive clean runs can skip deep scans
+        and only run quick detects.
+
+        Args:
+            file_path: Path to file
+            threshold: Minimum clean runs to skip deep scan (default: 3)
+
+        Returns:
+            True if file should skip deep scan
+        """
+        path_str = str(file_path)
+        if path_str not in self.entries:
+            return False
+
+        entry = self.entries[path_str]
+
+        # Skip deep scan if file has been clean for threshold or more runs
+        return entry.clean_runs_count >= threshold
 
 
 def compute_file_hash(file_path: Path) -> str:

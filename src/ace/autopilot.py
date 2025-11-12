@@ -18,6 +18,7 @@ from ace.learn import LearningEngine, context_key, get_rule_ids_from_plan
 from ace.policy import PolicyEngine
 from ace.receipts import Receipt
 from ace.skiplist import Skiplist
+from ace.telemetry import get_cost_ms_rank
 from ace.uir import UnifiedIssue
 
 
@@ -33,6 +34,7 @@ class AutopilotConfig:
     dry_run: bool = False
     silent: bool = False
     rules: list[str] | None = None
+    deep: bool = False  # Disable clean-skip heuristic
 
 
 @dataclass
@@ -184,8 +186,42 @@ def run_autopilot(cfg: AutopilotConfig) -> tuple[ExitCode, AutopilotStats]:
                 print(f"✓ No plans approved by policy (denied: {stats.policy_denied})")
             return (ExitCode.SUCCESS, stats)
 
-        # Step 8: Sort plans by priority (R* desc, then path for determinism)
-        approved_plans.sort(key=lambda p: (-p.estimated_risk, p.id))
+        # Step 8: Sort plans by priority using smart prioritization
+        # priority = (R★ * 100) - cost_ms_rank - revisit_penalty
+
+        # Get all unique rule IDs from approved plans
+        all_rule_ids = []
+        for plan in approved_plans:
+            all_rule_ids.extend(get_rule_ids_from_plan(plan))
+        all_rule_ids = list(set(all_rule_ids))
+
+        # Get cost ranking from telemetry
+        cost_ranks = get_cost_ms_rank(all_rule_ids)
+
+        # Calculate priority for each plan
+        def calculate_priority(plan):
+            rule_ids = get_rule_ids_from_plan(plan)
+
+            # Base priority from risk score
+            base_priority = plan.estimated_risk * 100
+
+            # Cost penalty (average rank of rules in plan)
+            cost_penalty = 0.0
+            if rule_ids:
+                cost_penalty = sum(cost_ranks.get(rid, 0) for rid in rule_ids) / len(rule_ids)
+
+            # Revisit penalty (check if context was reverted recently)
+            revisit_penalty = 0.0
+            ctx_key = context_key(plan)
+            if learning.should_skip_context(ctx_key, threshold=0.5):
+                revisit_penalty = 20.0  # Significant penalty for previously reverted contexts
+
+            priority = base_priority - cost_penalty - revisit_penalty
+
+            return priority
+
+        # Sort by priority descending, then by plan ID for determinism
+        approved_plans.sort(key=lambda p: (-calculate_priority(p), p.id))
 
         # Step 9: Enforce change budget
         if cfg.max_files or cfg.max_lines:
