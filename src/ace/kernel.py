@@ -27,7 +27,20 @@ from ace.skills.python import (
     refactor_subprocess_check,
     validate_python_syntax,
 )
+from ace.skills.quick_detects import (
+    analyze_assert_in_nontest,
+    analyze_eval_exec,
+    analyze_print_in_src,
+)
 from ace.skills.shell import analyze_shell_strict_mode
+from ace.skills.style import (
+    analyze_eof_newline,
+    analyze_excessive_blanklines,
+    analyze_trailing_whitespace,
+    refactor_eof_newline,
+    refactor_excessive_blanklines,
+    refactor_trailing_whitespace,
+)
 from ace.storage import AnalysisCache, compute_file_hash, compute_ruleset_hash
 from ace.suppressions import filter_findings_by_suppressions, parse_suppressions
 from ace.uir import UnifiedIssue
@@ -76,6 +89,12 @@ def run_analyze(
         "PY-S201-SUBPROCESS-CHECK",
         "PY-S202-SUBPROCESS-SHELL",
         "PY-S203-SUBPROCESS-STRING-CMD",
+        "PY-S310-TRAILING-WS",
+        "PY-S311-EOF-NL",
+        "PY-S312-BLANKLINES",
+        "PY-Q201-ASSERT-IN-NONTEST",
+        "PY-Q202-PRINT-IN-SRC",
+        "PY-Q203-EVAL-EXEC",
         "MD-S001-DANGEROUS-COMMAND",
         "YML-F001-DUPLICATE-KEY",
         "SH-S001-MISSING-STRICT-MODE",
@@ -127,6 +146,18 @@ def run_analyze(
                     file_findings.extend(analyze_subprocess_shell(content, path_str))
                 if should_run_rule("PY-S203-SUBPROCESS-STRING-CMD"):
                     file_findings.extend(analyze_subprocess_string_cmd(content, path_str))
+                if should_run_rule("PY-S310-TRAILING-WS"):
+                    file_findings.extend(analyze_trailing_whitespace(content, path_str))
+                if should_run_rule("PY-S311-EOF-NL"):
+                    file_findings.extend(analyze_eof_newline(content, path_str))
+                if should_run_rule("PY-S312-BLANKLINES"):
+                    file_findings.extend(analyze_excessive_blanklines(content, path_str))
+                if should_run_rule("PY-Q201-ASSERT-IN-NONTEST"):
+                    file_findings.extend(analyze_assert_in_nontest(content, path_str))
+                if should_run_rule("PY-Q202-PRINT-IN-SRC"):
+                    file_findings.extend(analyze_print_in_src(content, path_str))
+                if should_run_rule("PY-Q203-EVAL-EXEC"):
+                    file_findings.extend(analyze_eval_exec(content, path_str))
 
             # Markdown rules
             elif file_path.suffix == ".md":
