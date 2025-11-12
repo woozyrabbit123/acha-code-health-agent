@@ -276,3 +276,59 @@ def is_indexable(file_path: Path) -> bool:
             return False
 
     return True
+
+
+def warmup_index(target: Path) -> dict[str, int]:
+    """
+    Build or rebuild content index for a target path.
+
+    This is a deterministic operation that scans all indexable files
+    in the target and updates the content index with their metadata.
+
+    Args:
+        target: Target directory or file to index
+
+    Returns:
+        Dictionary with stats: {"indexed": count, "skipped": count, "errors": count}
+    """
+    # Determine index path based on target
+    if target.is_file():
+        # For single file, use .ace in parent directory
+        index_path = target.parent / ".ace" / "index.json"
+    else:
+        # For directory, use .ace inside the directory
+        index_path = target / ".ace" / "index.json"
+
+    index = ContentIndex(index_path=index_path)
+
+    # Load existing index (if any)
+    index.load()
+
+    # Collect files to index
+    if target.is_file():
+        files = [target] if is_indexable(target) else []
+    else:
+        files = sorted(target.rglob("*"))
+        # Filter for indexable files, excluding .ace directory
+        files = [
+            f for f in files
+            if f.is_file() and is_indexable(f) and ".ace" not in f.parts
+        ]
+
+    stats = {"indexed": 0, "skipped": 0, "errors": 0}
+
+    # Index each file
+    for file_path in files:
+        try:
+            index.add_file(file_path)
+            stats["indexed"] += 1
+        except OSError:
+            # Skip files that can't be read
+            stats["errors"] += 1
+        except Exception:
+            stats["errors"] += 1
+
+    # Save index
+    index.save()
+
+    return stats

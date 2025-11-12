@@ -188,3 +188,82 @@ def is_idempotent_transformation(
     before_hash = content_hash(before_content)
     after_hash = content_hash(after_content)
     return before_hash == after_hash
+
+
+def verify_receipts(base_path) -> list[str]:
+    """
+    Verify all receipts against journal and filesystem.
+
+    Cross-checks that:
+    1. Files mentioned in receipts still exist
+    2. Current file hashes match receipt after_hash
+    3. Receipts are consistent with journal entries
+
+    Args:
+        base_path: Base path for verification (Path or str)
+
+    Returns:
+        List of failure messages (empty if all OK)
+    """
+    from pathlib import Path
+    import json
+
+    base_path = Path(base_path)
+    journals_dir = base_path / ".ace" / "journals"
+
+    failures = []
+
+    if not journals_dir.exists():
+        return failures  # No journals, nothing to verify
+
+    # Read all journal files
+    for journal_file in sorted(journals_dir.glob("*.jsonl")):
+        try:
+            with open(journal_file, "r", encoding="utf-8") as f:
+                for line_no, line in enumerate(f, 1):
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    try:
+                        entry = json.loads(line)
+                        event_type = entry.get("event")
+
+                        # Look for success events with receipts
+                        if event_type == "success" and "receipt" in entry:
+                            receipt_dict = entry["receipt"]
+                            receipt = Receipt.from_dict(receipt_dict)
+
+                            # Verify file exists
+                            file_path = base_path / receipt.file
+                            if not file_path.exists():
+                                failures.append(
+                                    f"{journal_file.name}:{line_no} - "
+                                    f"File no longer exists: {receipt.file}"
+                                )
+                                continue
+
+                            # Verify current content matches after_hash
+                            try:
+                                current_content = file_path.read_text(encoding="utf-8")
+                                if not verify_receipt(receipt, current_content):
+                                    failures.append(
+                                        f"{journal_file.name}:{line_no} - "
+                                        f"Hash mismatch for {receipt.file} "
+                                        f"(expected {receipt.after_hash[:8]}...)"
+                                    )
+                            except Exception as e:
+                                failures.append(
+                                    f"{journal_file.name}:{line_no} - "
+                                    f"Cannot read {receipt.file}: {e}"
+                                )
+
+                    except json.JSONDecodeError:
+                        failures.append(
+                            f"{journal_file.name}:{line_no} - Invalid JSON"
+                        )
+
+        except Exception as e:
+            failures.append(f"{journal_file.name} - Cannot read journal: {e}")
+
+    return failures

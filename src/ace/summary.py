@@ -127,3 +127,44 @@ def write_markdown_summary(
     # Write report
     to.parent.mkdir(parents=True, exist_ok=True)
     to.write_text("".join(lines), encoding="utf-8")
+
+
+def print_run_summary(stats, silent: bool = False) -> None:
+    """
+    Print deterministic one-line summary of autopilot run.
+
+    Args:
+        stats: AutopilotStats object with run statistics
+        silent: If True, suppress output
+    """
+    if silent:
+        return
+
+    # Format: findings → plans → applied (files modified)
+    summary_parts = []
+
+    if stats.findings_count > 0:
+        summary_parts.append(f"{stats.findings_count} findings")
+
+    if stats.plans_count > 0:
+        summary_parts.append(f"{stats.plans_count} plans")
+
+    if stats.plans_approved > 0:
+        summary_parts.append(f"{stats.plans_approved} approved")
+
+    if stats.plans_applied > 0:
+        summary_parts.append(f"{stats.plans_applied} applied")
+
+    if stats.files_modified > 0:
+        summary_parts.append(f"{stats.files_modified} files")
+
+    if stats.budget_excluded > 0:
+        summary_parts.append(f"{stats.budget_excluded} excluded")
+
+    if stats.policy_denied > 0:
+        summary_parts.append(f"{stats.policy_denied} denied")
+
+    if summary_parts:
+        print(f"ACE Autopilot: {' → '.join(summary_parts)}")
+    else:
+        print("ACE Autopilot: no changes")
