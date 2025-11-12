@@ -5,6 +5,99 @@ All notable changes to the ACHA/ACE (Autonomous Code-Health Agent / Autonomous C
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [ACE 1.5.0] - 2025-01-12
+
+### Added
+
+- **Context Engine** - Local "brainstem" for intelligent code understanding and prioritization
+  - **Symbol Indexer** (`src/ace/repomap.py`)
+    - Fast AST-based Python symbol extraction (stdlib only, zero deps)
+    - `RepoMap.build()` - Parse *.py files, collect functions/classes/imports
+    - `RepoMap.save()` - Deterministic JSON output to `.ace/symbols.json`
+    - `RepoMap.query()` - Filter by pattern and/or type (function/class/module)
+    - Symbol records: name, type, file, line, deps, mtime, size
+    - Performance: <5s to index ACE repo (~50 files), deterministic hash
+
+  - **Dependency Graph** (`src/ace/depgraph.py`)
+    - Lightweight file-to-file dependency analysis from imports
+    - `DepGraph.who_calls(symbol)` - Find files that use a symbol
+    - `DepGraph.depends_on(file, depth)` - Transitive dependencies
+    - `DepGraph.find_cycles()` - Circular dependency detection
+    - `DepGraph.stats()` - Graph metrics (top importers/imported, avg degree)
+
+  - **Context Ranking** (`src/ace/context_rank.py`)
+    - Score files by relevance: symbol_density × recency_boost × relevance_score
+    - `ContextRanker.rank_files(query, limit)` - Top N relevant files
+    - `ContextRanker.get_related_files(file)` - Similar files by symbol overlap
+    - `ContextRanker.get_hot_files(days)` - Recently modified files
+    - Scoring: density (symbols/KLOC), recency (1.0-1.5 boost), query match
+
+  - **Impact Analyzer** (`src/ace/impact.py`)
+    - Predict affected files from changes via dependency traversal
+    - `ImpactAnalyzer.predict_impacted(files, depth)` - Full impact report
+    - `ImpactAnalyzer.explain_impact(file)` - Single-file impact breakdown
+    - `ImpactAnalyzer.get_blast_radius(files)` - Comprehensive metrics
+    - `ImpactAnalyzer.find_bottlenecks(top_n)` - Most depended-upon files
+    - Risk assessment: low/medium/high/critical based on impact breadth
+
+  - **Interactive Diff UI** (`src/ace/diffui.py`)
+    - Per-file accept/reject for patch review
+    - `interactive_review(changes)` - Terminal UI with rich (optional)
+    - `apply_approved_changes(changes, approved)` - Safe application
+    - Actions: [a]ccept, [r]eject, [v]iew full diff, [q]uit
+    - Syntax highlighting and preview snippets
+
+- **CLI Commands** (v1.5)
+  - `ace index build` - Build symbol index for repository
+  - `ace index query --pattern <name> --type <function|class|module>` - Query symbols
+  - `ace graph who-calls <symbol>` - Find callers of a symbol
+  - `ace graph depends-on <file> --depth N` - Get file dependencies
+  - `ace graph stats` - Show dependency graph statistics
+  - `ace context rank --query <pattern> --limit N` - Rank files by relevance
+  - `ace diff <patchfile> --interactive` - Interactive patch review
+
+- **Autopilot Integration**
+  - Context engine loads automatically in `--deep` mode
+  - Rebuilds index if >24h stale or missing
+  - Logs "RepoMap loaded" on successful initialization
+  - Enhanced priority calculation: `priority = R★ - cost - revisit + context_boost`
+  - Context boost: avg(file_density + file_recency) × 5.0 (max ~5 points)
+  - Prioritizes changes to recently-modified, symbol-dense files
+
+- **Documentation**
+  - `docs/CONTEXT.md` - Comprehensive context engine guide (600+ lines)
+    - Architecture overview with schemas
+    - CLI command reference with examples
+    - Performance targets and benchmarks
+    - Integration patterns (pre-commit hooks, code review)
+    - Troubleshooting and FAQ
+
+### Tests
+
+- `tests/ace/test_repomap.py` - Symbol indexer (build, query, determinism)
+- `tests/ace/test_depgraph.py` - Dependency graph (traversal, cycles, stats)
+- `tests/ace/test_context_rank.py` - Context ranking (scoring, stability)
+- `tests/ace/test_impact.py` - Impact analysis (depth-limited, blast radius)
+- `tests/ace/test_diffui.py` - Interactive diff (auto-approve, apply)
+
+### Performance
+
+- Symbol index build: <5s for 50 files (ACE repo), <3s cached
+- Index query: <100ms (typically ~10ms)
+- Dependency graph traversal: <50ms for depth=2
+- Context ranking: <200ms for 10 results
+- Deterministic: `.ace/symbols.json` hash stable across runs
+
+### Acceptance Criteria
+
+- ✓ `ace index build` completes <5s on ACE repo
+- ✓ `.ace/symbols.json` deterministic (same hash over two runs)
+- ✓ `ace graph who-calls "analyze"` returns ≥1 file
+- ✓ `ace graph depends-on src/ace/autopilot.py` non-empty
+- ✓ `ace context rank --query path` returns 10 files max, stable order
+- ✓ `ace autopilot --deep` logs "RepoMap loaded" and uses impact to order plans
+- ✓ `ace diff --interactive` can accept/reject, accepted files only applied
+
 ## [ACE 0.9.0] - 2025-01-12
 
 ### Added
