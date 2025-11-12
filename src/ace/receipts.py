@@ -25,6 +25,8 @@ class Receipt:
         duration_ms: Time taken to apply the transformation in milliseconds
         timestamp: ISO 8601 timestamp of when transformation was applied
         policy_hash: Hash of policy configuration used (optional, v0.7+)
+        partial_apply: Whether only a subset of edits were applied (v1.4+)
+        repaired_edits: Indices of edits that were skipped due to guard failure (v1.4+)
     """
 
     plan_id: str
@@ -37,6 +39,8 @@ class Receipt:
     duration_ms: int
     timestamp: str
     policy_hash: str = ""
+    partial_apply: bool = False
+    repaired_edits: list[int] | None = None
 
     def to_dict(self) -> dict:
         """Convert receipt to dictionary for JSON serialization."""
@@ -54,6 +58,11 @@ class Receipt:
         # Only include policy_hash if present (v0.7+)
         if self.policy_hash:
             result["policy_hash"] = self.policy_hash
+        # Include partial_apply and repaired_edits if present (v1.4+)
+        if self.partial_apply:
+            result["partial_apply"] = self.partial_apply
+        if self.repaired_edits is not None:
+            result["repaired_edits"] = self.repaired_edits
         return result
 
     @staticmethod
@@ -70,6 +79,8 @@ class Receipt:
             duration_ms=data["duration_ms"],
             timestamp=data["timestamp"],
             policy_hash=data.get("policy_hash", ""),
+            partial_apply=data.get("partial_apply", False),
+            repaired_edits=data.get("repaired_edits"),
         )
 
 
