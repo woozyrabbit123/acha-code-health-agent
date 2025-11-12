@@ -599,6 +599,118 @@ def cmd_policy(args):
         return ExitCode.OPERATIONAL_ERROR
 
 
+def cmd_autopilot(args):
+    """Run autopilot orchestration."""
+    try:
+        from ace.autopilot import AutopilotConfig, run_autopilot
+        from ace.summary import print_run_summary
+
+        target = Path(args.target)
+        if not target.exists():
+            raise OperationalError(f"Target path does not exist: {target}")
+
+        rules = args.rules.split(",") if args.rules else None
+
+        cfg = AutopilotConfig(
+            target=target,
+            allow_mode=args.allow if hasattr(args, "allow") else "suggest",
+            max_files=args.max_files if hasattr(args, "max_files") else None,
+            max_lines=args.max_lines if hasattr(args, "max_lines") else None,
+            incremental=args.incremental if hasattr(args, "incremental") else False,
+            dry_run=args.dry_run if hasattr(args, "dry_run") else False,
+            silent=args.silent if hasattr(args, "silent") else False,
+            rules=rules,
+        )
+
+        exit_code, stats = run_autopilot(cfg)
+
+        # Print summary
+        if not cfg.silent:
+            print_run_summary(stats, silent=cfg.silent)
+
+        return exit_code
+
+    except ACEError as e:
+        print(format_error(e), file=sys.stderr)
+        return e.exit_code
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
+def cmd_verify(args):
+    """Verify receipts against journal and filesystem."""
+    try:
+        from ace.receipts import verify_receipts
+
+        base_path = Path(args.base_path) if hasattr(args, "base_path") else Path(".")
+
+        failures = verify_receipts(base_path)
+
+        if not failures:
+            receipt_count = len(list(Path(".ace/journals").rglob("*.jsonl"))) if Path(".ace/journals").exists() else 0
+            print(f"✓ Integrity OK ({receipt_count} receipt(s))")
+            return ExitCode.SUCCESS
+        else:
+            print(f"✗ Verification failed: {len(failures)} issue(s)", file=sys.stderr)
+            for failure in failures[:10]:  # Show first 10
+                print(f"  - {failure}", file=sys.stderr)
+            if len(failures) > 10:
+                print(f"  ... and {len(failures) - 10} more", file=sys.stderr)
+            return ExitCode.OPERATIONAL_ERROR
+
+    except ACEError as e:
+        print(format_error(e), file=sys.stderr)
+        return e.exit_code
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
+def cmd_rules(args):
+    """Manage rules configuration."""
+    try:
+        from ace.rules_local import bump_rules_version, get_rules_version, init_rules
+
+        subcommand = args.rules_command if hasattr(args, "rules_command") else None
+
+        if subcommand == "upgrade-local":
+            # Deterministic local bump of rules version
+            rules_path = Path(".ace/rules.json")
+            old_version = get_rules_version(rules_path)
+
+            bump_rules_version(rules_path)
+
+            new_version = get_rules_version(rules_path)
+
+            print(f"Rules upgraded: {old_version} → {new_version}")
+            print(f"✓ Rules catalog updated at {rules_path}")
+            return ExitCode.SUCCESS
+
+        elif subcommand == "init":
+            # Initialize rules.json
+            rules_path = Path(".ace/rules.json")
+            init_rules(rules_path)
+            version = get_rules_version(rules_path)
+            print(f"✓ Rules initialized (version: {version})")
+            return ExitCode.SUCCESS
+
+        elif subcommand == "show":
+            # Show current rules version
+            rules_path = Path(".ace/rules.json")
+            version = get_rules_version(rules_path)
+            print(f"Rules version: {version}")
+            return ExitCode.SUCCESS
+
+        else:
+            print("Usage: ace rules [upgrade-local|init|show]")
+            return ExitCode.INVALID_ARGS
+
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
 def cmd_selftest(args):
     """Run determinism self-test (analyze twice, compare receipts)."""
     try:
@@ -998,6 +1110,72 @@ def main():
             "--rules", help="Comma-separated list of rule IDs (default: all)"
         )
         parser_selftest.set_defaults(func=cmd_selftest)
+
+        # autopilot subcommand
+        parser_autopilot = subparsers.add_parser(
+            "autopilot", help="Run autopilot orchestration"
+        )
+        parser_autopilot.add_argument(
+            "--target", required=True, help="Target directory or file to analyze"
+        )
+        parser_autopilot.add_argument(
+            "--allow", choices=["auto", "suggest"], default="suggest",
+            help="Allow mode: auto or suggest (default: suggest)"
+        )
+        parser_autopilot.add_argument(
+            "--max-files", type=int, help="Maximum number of files to modify"
+        )
+        parser_autopilot.add_argument(
+            "--max-lines", type=int, help="Maximum number of lines to modify"
+        )
+        parser_autopilot.add_argument(
+            "--incremental", action="store_true", help="Only analyze changed files"
+        )
+        parser_autopilot.add_argument(
+            "--dry-run", action="store_true", help="Plan only, don't apply changes"
+        )
+        parser_autopilot.add_argument(
+            "--silent", action="store_true", help="Silent mode: suppress non-error output"
+        )
+        parser_autopilot.add_argument(
+            "--rules", help="Comma-separated list of rule IDs (default: all)"
+        )
+        parser_autopilot.set_defaults(func=cmd_autopilot)
+
+        # verify subcommand
+        parser_verify = subparsers.add_parser(
+            "verify", help="Verify receipts against journal and filesystem"
+        )
+        parser_verify.add_argument(
+            "--base-path", default=".", help="Base path to verify (default: .)"
+        )
+        parser_verify.set_defaults(func=cmd_verify)
+
+        # rules subcommands
+        parser_rules = subparsers.add_parser(
+            "rules", help="Manage rules configuration"
+        )
+        rules_subparsers = parser_rules.add_subparsers(
+            dest="rules_command", help="Rules commands"
+        )
+
+        # rules upgrade-local
+        parser_rules_upgrade = rules_subparsers.add_parser(
+            "upgrade-local", help="Upgrade rules version locally (deterministic)"
+        )
+        parser_rules_upgrade.set_defaults(func=cmd_rules)
+
+        # rules init
+        parser_rules_init = rules_subparsers.add_parser(
+            "init", help="Initialize rules.json"
+        )
+        parser_rules_init.set_defaults(func=cmd_rules)
+
+        # rules show
+        parser_rules_show = rules_subparsers.add_parser(
+            "show", help="Show current rules version"
+        )
+        parser_rules_show.set_defaults(func=cmd_rules)
 
         args = parser.parse_args()
 
