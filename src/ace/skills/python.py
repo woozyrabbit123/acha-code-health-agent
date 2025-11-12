@@ -987,3 +987,94 @@ def validate_python_syntax(source: str) -> bool:
         return True
     except Exception:
         return False
+
+
+# ============================================================================
+# Fast-path for style-only rules (bypasses LibCST)
+# ============================================================================
+
+
+def fast_style_path(content: str, path: str, rules: list[str] | None = None) -> tuple[str, list[EditPlan]]:
+    """
+    Fast-path analyzer and refactor for style-only rules.
+
+    Bypasses heavy LibCST metadata builds for files that only need
+    simple text-based style fixes. Runs much faster than the full
+    LibCST pipeline for style rules.
+
+    Supported rules:
+    - PY-S310-TRAILING-WS: Remove trailing whitespace
+    - PY-S311-EOF-NL: Ensure single newline at EOF
+    - PY-S312-BLANKLINES: Collapse excessive blank lines
+
+    Args:
+        content: Source code content
+        path: File path
+        rules: Optional list of specific rules to apply (default: all style rules)
+
+    Returns:
+        Tuple of (refactored_content, list_of_edit_plans)
+    """
+    from ace.skills.style import (
+        analyze_trailing_whitespace,
+        refactor_trailing_whitespace,
+        analyze_eof_newline,
+        refactor_eof_newline,
+        analyze_excessive_blanklines,
+        refactor_excessive_blanklines,
+    )
+
+    # Define style rules
+    style_rules = {
+        "PY-S310-TRAILING-WS": (analyze_trailing_whitespace, refactor_trailing_whitespace),
+        "PY-S311-EOF-NL": (analyze_eof_newline, refactor_eof_newline),
+        "PY-S312-BLANKLINES": (analyze_excessive_blanklines, refactor_excessive_blanklines),
+    }
+
+    # Filter rules if specific ones requested
+    if rules:
+        active_rules = {k: v for k, v in style_rules.items() if k in rules}
+    else:
+        active_rules = style_rules
+
+    current_content = content
+    plans = []
+
+    # Apply each style rule sequentially
+    for rule_id, (analyze_fn, refactor_fn) in active_rules.items():
+        # Analyze current content
+        findings = analyze_fn(current_content, path)
+
+        if findings:
+            # Apply refactoring
+            current_content, plan = refactor_fn(current_content, path, findings)
+            plans.append(plan)
+
+    return current_content, plans
+
+
+def is_style_only_file(path: str, telemetry_history: dict | None = None) -> bool:
+    """
+    Check if a file historically only has style issues.
+
+    Uses telemetry data to determine if we can use fast-path.
+
+    Args:
+        path: File path
+        telemetry_history: Optional dict of file->rules mapping from telemetry
+
+    Returns:
+        True if file only has style rules historically
+    """
+    if not telemetry_history:
+        return False
+
+    # Check if file only has style rules in history
+    style_rule_ids = {"PY-S310-TRAILING-WS", "PY-S311-EOF-NL", "PY-S312-BLANKLINES"}
+
+    file_rules = telemetry_history.get(path, set())
+    if not file_rules:
+        return False
+
+    # All rules must be style rules
+    return file_rules.issubset(style_rule_ids)

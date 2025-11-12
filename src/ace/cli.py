@@ -628,6 +628,7 @@ def cmd_autopilot(args):
             dry_run=args.dry_run if hasattr(args, "dry_run") else False,
             silent=args.silent if hasattr(args, "silent") else False,
             rules=rules,
+            deep=args.deep if hasattr(args, "deep") else False,
         )
 
         exit_code, stats = run_autopilot(cfg)
@@ -670,6 +671,56 @@ def cmd_verify(args):
     except ACEError as e:
         print(format_error(e), file=sys.stderr)
         return e.exit_code
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
+def cmd_tune(args):
+    """Show performance tuning recommendations based on telemetry."""
+    try:
+        from ace.telemetry import Telemetry
+
+        telemetry = Telemetry()
+
+        # Load telemetry stats
+        stats = telemetry.load_stats()
+
+        if stats.total_executions == 0:
+            print("No telemetry data yet. Run analyze/autopilot to collect performance data.")
+            return ExitCode.SUCCESS
+
+        # Get top 3 slowest rules
+        top_slow_rules = telemetry.get_top_slow_rules(limit=3)
+
+        print("ACE Performance Tuning\n" + "=" * 60)
+        print(f"\nTotal rule executions: {stats.total_executions}")
+
+        if top_slow_rules:
+            print(f"\nTop {len(top_slow_rules)} slowest rules:\n")
+            print(f"{'Rule ID':<35} {'Avg Time (ms)':<15} {'Count':<10}")
+            print("-" * 60)
+
+            for rule_id, avg_ms, count in top_slow_rules:
+                print(f"{rule_id:<35} {avg_ms:>13.2f} {count:>9}")
+
+            # Calculate estimated time per file
+            if top_slow_rules:
+                total_avg_time = sum(avg_ms for _, avg_ms, _ in top_slow_rules)
+                files_per_second = 1000.0 / total_avg_time if total_avg_time > 0 else 0
+
+                print(f"\n{'Estimated throughput':<30}: {files_per_second:.1f} files/sec")
+
+                # Suggest --max-files for different time budgets
+                print(f"\nRecommended --max-files for time budgets:")
+                for seconds in [10, 30, 60]:
+                    max_files = int(files_per_second * seconds)
+                    print(f"  {seconds:3d}s runtime: --max-files={max_files}")
+        else:
+            print("\nNo slow rules detected.")
+
+        return ExitCode.SUCCESS
+
     except Exception as e:
         print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
         return ExitCode.OPERATIONAL_ERROR
@@ -947,6 +998,9 @@ def main():
         parser_analyze.add_argument(
             "--silent", action="store_true", help="Silent mode: suppress non-error output"
         )
+        parser_analyze.add_argument(
+            "--deep", action="store_true", help="Disable clean-skip heuristic (force deep scan)"
+        )
         parser_analyze.set_defaults(func=cmd_analyze)
 
         # refactor subcommand
@@ -1205,6 +1259,9 @@ def main():
         parser_autopilot.add_argument(
             "--rules", help="Comma-separated list of rule IDs (default: all)"
         )
+        parser_autopilot.add_argument(
+            "--deep", action="store_true", help="Disable clean-skip heuristic (force deep scan)"
+        )
         parser_autopilot.set_defaults(func=cmd_autopilot)
 
         # verify subcommand
@@ -1241,6 +1298,12 @@ def main():
             "show", help="Show current rules version"
         )
         parser_rules_show.set_defaults(func=cmd_rules)
+
+        # tune subcommand
+        parser_tune = subparsers.add_parser(
+            "tune", help="Show performance tuning recommendations"
+        )
+        parser_tune.set_defaults(func=cmd_tune)
 
         # learn subcommands
         parser_learn = subparsers.add_parser(
