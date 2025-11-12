@@ -1,0 +1,64 @@
+name: ACE Code Health
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+
+jobs:
+  ace-analysis:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for baseline comparison
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ACE
+        run: |
+          pip install -e .
+
+      - name: Run ACE analysis
+        run: |
+          python -m ace.cli analyze --target . --jobs 4
+
+      - name: Compare against baseline
+        if: always()
+        run: |
+          # Create baseline from main branch if it doesn't exist
+          if [ ! -f .ace/baseline.json ]; then
+            echo "No baseline found, creating from main branch..."
+            git checkout main -- .ace/baseline.json 2>/dev/null || true
+          fi
+
+          # If baseline exists, compare with --fail-on-new
+          if [ -f .ace/baseline.json ]; then
+            python -m ace.cli baseline compare \
+              --target . \
+              --baseline-path .ace/baseline.json \
+              --fail-on-new
+          else
+            echo "⚠️  No baseline available for comparison"
+            echo "Run 'ace baseline create --target . --baseline-path .ace/baseline.json' on main branch"
+          fi
+
+# ACE Exit Codes:
+# - 0: Success (no issues or within baseline)
+# - 1: Operational error (parse failures, config issues)
+# - 2: Policy violation (new findings or regressions detected)
+#
+# To create a baseline on main branch:
+#   ace baseline create --target . --baseline-path .ace/baseline.json
+#   git add .ace/baseline.json
+#   git commit -m "chore: create ACE baseline"
+#
+# Configuration:
+#   Add ace.toml to configure rules, includes/excludes, and cache settings
+#   See docs/CI.md for detailed setup instructions

@@ -39,7 +39,7 @@ def test_cli_version():
 
     output = result.stdout + result.stderr
 
-    assert "ACE v0.3.0-dev" in output, f"Expected 'ACE v0.3.0-dev', got: {output}"
+    assert "ACE v0.4.0-dev" in output, f"Expected 'ACE v0.4.0-dev', got: {output}"
 
 
 def test_analyze_stub():
