@@ -828,6 +828,213 @@ def cmd_ui(args):
         return ExitCode.OPERATIONAL_ERROR
 
 
+def cmd_assist(args):
+    """LLM assist for code suggestions (v2.0)."""
+    try:
+        from ace.llm import get_assist
+
+        subcommand = args.assist_command if hasattr(args, "assist_command") else None
+        assist = get_assist()
+
+        if subcommand == "docstring":
+            # Parse location (e.g., src/main.py:42)
+            location = args.location
+            if ":" not in location:
+                print("Error: location must be in format path:line", file=sys.stderr)
+                return ExitCode.INVALID_ARGS
+
+            file_path, line_num = location.rsplit(":", 1)
+            file_path = Path(file_path)
+
+            if not file_path.exists():
+                print(f"Error: file not found: {file_path}", file=sys.stderr)
+                return ExitCode.OPERATIONAL_ERROR
+
+            # Read file and extract function signature
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                    line_idx = int(line_num) - 1
+                    if line_idx < 0 or line_idx >= len(lines):
+                        print(f"Error: line {line_num} out of range", file=sys.stderr)
+                        return ExitCode.OPERATIONAL_ERROR
+
+                    # Get function signature (may span multiple lines)
+                    signature = lines[line_idx].strip()
+
+                    # Generate docstring
+                    docstring = assist.docstring_one_liner(signature)
+
+                    print(f"Suggested docstring for {file_path}:{line_num}:")
+                    print(f'  """{docstring}"""')
+
+            except Exception as e:
+                print(f"Error reading file: {e}", file=sys.stderr)
+                return ExitCode.OPERATIONAL_ERROR
+
+            return ExitCode.SUCCESS
+
+        elif subcommand == "name":
+            # Similar to docstring, but suggest name
+            location = args.location
+            if ":" not in location:
+                print("Error: location must be in format path:line", file=sys.stderr)
+                return ExitCode.INVALID_ARGS
+
+            file_path, line_num = location.rsplit(":", 1)
+            file_path = Path(file_path)
+
+            if not file_path.exists():
+                print(f"Error: file not found: {file_path}", file=sys.stderr)
+                return ExitCode.OPERATIONAL_ERROR
+
+            # Read file and extract code context
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                    line_idx = int(line_num) - 1
+                    if line_idx < 0 or line_idx >= len(lines):
+                        print(f"Error: line {line_num} out of range", file=sys.stderr)
+                        return ExitCode.OPERATIONAL_ERROR
+
+                    # Get surrounding context (5 lines)
+                    start = max(0, line_idx - 2)
+                    end = min(len(lines), line_idx + 3)
+                    code = "".join(lines[start:end])
+
+                    # Get current name from line
+                    current_line = lines[line_idx].strip()
+                    current_name = current_line.split()[1] if len(current_line.split()) > 1 else ""
+
+                    # Suggest name
+                    suggested = assist.suggest_name(code, current_name)
+
+                    if suggested:
+                        print(f"Suggested name for {file_path}:{line_num}: {suggested}")
+                    else:
+                        print(f"No suggestion available (heuristic fallback)")
+
+            except Exception as e:
+                print(f"Error reading file: {e}", file=sys.stderr)
+                return ExitCode.OPERATIONAL_ERROR
+
+            return ExitCode.SUCCESS
+
+        else:
+            print("Usage: ace assist {docstring|name} location")
+            return ExitCode.INVALID_ARGS
+
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
+def cmd_commitmsg(args):
+    """Generate commit message from diff (v2.0)."""
+    try:
+        from ace.llm import get_assist
+        import subprocess
+
+        assist = get_assist()
+
+        # Get diff
+        diff = ""
+        if args.from_diff:
+            # Get diff from git
+            try:
+                result = subprocess.run(
+                    ["git", "diff", "--cached"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if result.returncode == 0:
+                    diff = result.stdout
+                else:
+                    print("Error: git diff failed", file=sys.stderr)
+                    return ExitCode.OPERATIONAL_ERROR
+            except Exception as e:
+                print(f"Error running git diff: {e}", file=sys.stderr)
+                return ExitCode.OPERATIONAL_ERROR
+
+        elif hasattr(args, "file") and args.file:
+            # Read diff from file
+            diff_path = Path(args.file)
+            if not diff_path.exists():
+                print(f"Error: file not found: {diff_path}", file=sys.stderr)
+                return ExitCode.OPERATIONAL_ERROR
+            diff = diff_path.read_text()
+
+        else:
+            print("Error: must specify --from-diff or --file", file=sys.stderr)
+            return ExitCode.INVALID_ARGS
+
+        if not diff.strip():
+            print("No diff to summarize")
+            return ExitCode.SUCCESS
+
+        # Generate commit message
+        summary = assist.summarize_diff(diff)
+
+        print("Suggested commit message:")
+        print(f"  {summary}")
+
+        return ExitCode.SUCCESS
+
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
+def cmd_check(args):
+    """Run checks like CI (v2.0)."""
+    try:
+        target = Path(args.target)
+        if not target.exists():
+            raise OperationalError(f"Target path does not exist: {target}")
+
+        rules = args.rules.split(",") if hasattr(args, "rules") and args.rules else None
+        strict = args.strict if hasattr(args, "strict") else False
+
+        print(f"Running ACE checks on {target}...")
+
+        # Run analysis
+        findings = run_analyze(target, rules)
+
+        print(f"\n{'=' * 60}")
+        print(f"ACE Check Results")
+        print(f"{'=' * 60}\n")
+        print(f"Total findings: {len(findings)}")
+
+        # Group by severity
+        by_severity = {}
+        for f in findings:
+            sev = f.severity.value
+            if sev not in by_severity:
+                by_severity[sev] = []
+            by_severity[sev].append(f)
+
+        for severity in ["critical", "high", "medium", "low", "info"]:
+            if severity in by_severity:
+                count = len(by_severity[severity])
+                print(f"  {severity.capitalize()}: {count}")
+
+        # In strict mode, fail if any findings
+        if strict and findings:
+            print(f"\n✗ Check failed: {len(findings)} finding(s) in strict mode")
+            return ExitCode.POLICY_DENY
+
+        print(f"\n✓ Check passed")
+        return ExitCode.SUCCESS
+
+    except ACEError as e:
+        print(format_error(e), file=sys.stderr)
+        return e.exit_code
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
 def cmd_repair(args):
     """Show repair report for partial edit failures."""
     try:
@@ -1395,7 +1602,7 @@ def cmd_pack(args):
 
 
 def cmd_install_pre_commit(args):
-    """Install pre-commit hook."""
+    """Install pre-commit hook (idempotent)."""
     try:
         import os
         import stat
@@ -1437,17 +1644,45 @@ echo "ACE checks passed!"
 exit 0
 """
 
-        hook_path.write_text(hook_content)
+        # Check if hook already exists
+        if hook_path.exists():
+            existing_content = hook_path.read_text()
 
-        # Make executable
-        st = hook_path.stat()
-        hook_path.chmod(st.st_mode | stat.S_IEXEC)
+            # If ACE hook already installed with same content, report and exit
+            if "# ACE pre-commit hook" in existing_content:
+                if existing_content.strip() == hook_content.strip():
+                    print(f"✓ ACE pre-commit hook already installed at {hook_path}")
+                    print("  (no changes needed)")
+                    return ExitCode.SUCCESS
+                else:
+                    # Update to new version
+                    print(f"Updating ACE pre-commit hook at {hook_path}...")
+                    hook_path.write_text(hook_content)
+                    st = hook_path.stat()
+                    hook_path.chmod(st.st_mode | stat.S_IEXEC)
+                    print(f"✓ ACE pre-commit hook updated")
+                    return ExitCode.SUCCESS
+            else:
+                # Non-ACE hook exists, preserve it and append ACE checks
+                print(f"⚠ Existing pre-commit hook found at {hook_path}")
+                print("  Appending ACE checks to existing hook...")
 
-        print(f"✓ Pre-commit hook installed at {hook_path}")
-        print("  The hook will run 'ace analyze' on staged Python files")
-        print("  To bypass: git commit --no-verify")
-
-        return ExitCode.SUCCESS
+                # Append ACE checks after existing hook
+                combined_content = existing_content.rstrip() + "\n\n" + hook_content
+                hook_path.write_text(combined_content)
+                st = hook_path.stat()
+                hook_path.chmod(st.st_mode | stat.S_IEXEC)
+                print(f"✓ ACE checks appended to existing pre-commit hook")
+                return ExitCode.SUCCESS
+        else:
+            # No hook exists, install fresh
+            hook_path.write_text(hook_content)
+            st = hook_path.stat()
+            hook_path.chmod(st.st_mode | stat.S_IEXEC)
+            print(f"✓ Pre-commit hook installed at {hook_path}")
+            print("  The hook will run 'ace analyze' on staged Python files")
+            print("  To bypass: git commit --no-verify")
+            return ExitCode.SUCCESS
 
     except Exception as e:
         print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
@@ -2078,6 +2313,61 @@ def main():
             "ui", help="Launch TUI dashboard"
         )
         parser_ui.set_defaults(func=cmd_ui)
+
+        # assist subcommands (v2.0)
+        parser_assist = subparsers.add_parser(
+            "assist", help="LLM assist for code suggestions (optional)"
+        )
+        assist_subparsers = parser_assist.add_subparsers(
+            dest="assist_command", help="Assist commands"
+        )
+
+        # assist docstring
+        parser_assist_docstring = assist_subparsers.add_parser(
+            "docstring", help="Generate docstring for function"
+        )
+        parser_assist_docstring.add_argument(
+            "location", help="File path and line (e.g., src/main.py:42)"
+        )
+        parser_assist_docstring.set_defaults(func=cmd_assist)
+
+        # assist name
+        parser_assist_name = assist_subparsers.add_parser(
+            "name", help="Suggest better name for code entity"
+        )
+        parser_assist_name.add_argument(
+            "location", help="File path and line (e.g., src/main.py:42)"
+        )
+        parser_assist_name.set_defaults(func=cmd_assist)
+
+        # commitmsg subcommand (v2.0)
+        parser_commitmsg = subparsers.add_parser(
+            "commitmsg", help="Generate commit message from diff"
+        )
+        parser_commitmsg.add_argument(
+            "--from-diff", action="store_true",
+            help="Generate from current git diff"
+        )
+        parser_commitmsg.add_argument(
+            "--file", help="Read diff from file"
+        )
+        parser_commitmsg.set_defaults(func=cmd_commitmsg)
+
+        # check subcommand (v2.0)
+        parser_check = subparsers.add_parser(
+            "check", help="Run checks (like CI)"
+        )
+        parser_check.add_argument(
+            "--target", default=".", help="Target directory (default: .)"
+        )
+        parser_check.add_argument(
+            "--strict", action="store_true",
+            help="Strict mode: fail on any findings"
+        )
+        parser_check.add_argument(
+            "--rules", help="Comma-separated list of rule IDs (default: all)"
+        )
+        parser_check.set_defaults(func=cmd_check)
 
         args = parser.parse_args()
 
