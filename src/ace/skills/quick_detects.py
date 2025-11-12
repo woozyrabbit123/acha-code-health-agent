@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 import libcst as cst
+from libcst import ParserSyntaxError, CSTValidationError
 from libcst.metadata import MetadataWrapper, PositionProvider
 
 from ace.uir import UnifiedIssue, create_uir
@@ -66,7 +67,7 @@ def analyze_assert_in_nontest(src: str, path: str) -> list[UnifiedIssue]:
 
         wrapper.visit(AssertVisitor())
 
-    except cst.ParserSyntaxError as e:
+    except (ParserSyntaxError, CSTValidationError) as e:
         logger.warning(f"Failed to parse {path}: {e}")
     except (OSError, ValueError) as e:
         logger.warning(f"Error analyzing {path}: {e}")
@@ -122,7 +123,7 @@ def analyze_print_in_src(src: str, path: str) -> list[UnifiedIssue]:
 
         wrapper.visit(PrintVisitor())
 
-    except cst.ParserSyntaxError as e:
+    except (ParserSyntaxError, CSTValidationError) as e:
         logger.warning(f"Failed to parse {path}: {e}")
     except (OSError, ValueError) as e:
         logger.warning(f"Error analyzing {path}: {e}")
@@ -173,7 +174,7 @@ def analyze_eval_exec(src: str, path: str) -> list[UnifiedIssue]:
 
         wrapper.visit(EvalExecVisitor())
 
-    except cst.ParserSyntaxError as e:
+    except (ParserSyntaxError, CSTValidationError) as e:
         logger.warning(f"Failed to parse {path}: {e}")
     except (OSError, ValueError) as e:
         logger.warning(f"Error analyzing {path}: {e}")

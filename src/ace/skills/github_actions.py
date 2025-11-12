@@ -44,6 +44,36 @@ def analyze_github_workflow(file_path: Path | str, content: str) -> list[Unified
 
     # Check for top-level permissions
     has_top_level_permissions = "permissions" in data
+    top_level_permissions = data.get("permissions") if has_top_level_permissions else None
+
+    # Check top-level permissions for write-all or write scopes
+    if top_level_permissions:
+        if isinstance(top_level_permissions, str) and top_level_permissions == "write-all":
+            findings.append(
+                create_uir(
+                    file=file_path_str,
+                    line=1,
+                    rule=RULE_WRITE_ALL,
+                    severity=Severity.HIGH,
+                    message="Workflow grants write-all permissions at top level (overly permissive)",
+                    suggestion="Use minimal permissions: permissions: { contents: read }",
+                    snippet="permissions: write-all",
+                )
+            )
+        elif isinstance(top_level_permissions, dict):
+            write_scopes = sorted([k for k, v in top_level_permissions.items() if v == "write"])
+            if write_scopes:
+                findings.append(
+                    create_uir(
+                        file=file_path_str,
+                        line=1,
+                        rule=RULE_WRITE_ALL,
+                        severity=Severity.HIGH,
+                        message=f"Workflow grants write permissions at top level to scopes: {write_scopes}",
+                        suggestion="Review if write permissions are necessary",
+                        snippet=f"permissions with write to {write_scopes}",
+                    )
+                )
 
     # Get all jobs
     jobs = data.get("jobs", {})

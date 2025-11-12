@@ -39,6 +39,7 @@ def analyze_dockerfile(file_path: Path | str, content: str) -> list[UnifiedIssue
     lines = content.splitlines()
 
     # Track state
+    # Each FROM starts a new stage; we require USER in the *final* stage
     has_user_instruction = False
     from_instructions = []
 
@@ -52,6 +53,7 @@ def analyze_dockerfile(file_path: Path | str, content: str) -> list[UnifiedIssue
         # Check for FROM with :latest
         if line_stripped.upper().startswith("FROM "):
             # Reset USER tracking for each new FROM (multi-stage builds)
+            # Only the final stage needs USER instruction
             has_user_instruction = False
             from_instructions.append((line_num, line_stripped))
             if ":latest" in line_stripped.lower() or (

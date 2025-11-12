@@ -136,6 +136,26 @@ def verify_parseable(file_path: str, language: str) -> bool:
     return True
 
 
+def _fsync_dir(directory: Path) -> None:
+    """
+    Fsync directory to ensure rename is persisted.
+
+    Best-effort operation (some platforms don't support directory fsync).
+
+    Args:
+        directory: Directory to fsync
+    """
+    try:
+        fd = os.open(str(directory), os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except Exception:
+        # Best-effort; some platforms don't support directory fsync.
+        pass
+
+
 def atomic_write(path: Path, content: bytes) -> None:
     """
     Atomically write content to file using temp + fsync + rename.
@@ -144,6 +164,7 @@ def atomic_write(path: Path, content: bytes) -> None:
     - Partial writes are never visible
     - Original file remains intact until replacement is complete
     - Content is synced to disk before rename
+    - Directory metadata is synced (best-effort)
 
     Args:
         path: Target file path
@@ -162,6 +183,7 @@ def atomic_write(path: Path, content: bytes) -> None:
         b'hello world'
     """
     # Ensure parent directory exists
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     # Write to temp file in same directory (for atomic rename)
@@ -184,6 +206,9 @@ def atomic_write(path: Path, content: bytes) -> None:
 
         # Atomic replace (POSIX guarantees atomicity)
         os.replace(temp_path, path)
+
+        # Fsync directory to ensure rename is persisted
+        _fsync_dir(path.parent)
 
     except Exception:
         # Clean up temp file on failure

@@ -22,7 +22,9 @@ class GuardResult:
     before_content: str
     after_content: str
     errors: list[str]
-    guard_type: str  # "parse", "ast_equiv", "cst_apply"
+    guard_type: str  # "parse", "ast_equiv", "cst_apply", "ast_hash"
+    ast_hash_before: str = ""
+    ast_hash_after: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -33,6 +35,8 @@ class GuardResult:
             "guard_type": self.guard_type,
             "before_hash": hashlib.sha256(self.before_content.encode()).hexdigest()[:16],
             "after_hash": hashlib.sha256(self.after_content.encode()).hexdigest()[:16],
+            "ast_hash_before": self.ast_hash_before[:16] if self.ast_hash_before else "",
+            "ast_hash_after": self.ast_hash_after[:16] if self.ast_hash_after else "",
         }
 
 
@@ -63,6 +67,24 @@ def verify_python_parse(content: str) -> tuple[bool, list[str]]:
         return False, errors
 
     return True, []
+
+
+def _ast_hash(src: str) -> str:
+    """
+    Compute deterministic hash of AST structure.
+
+    Args:
+        src: Python source code
+
+    Returns:
+        SHA256 hash of AST dump (without attributes)
+    """
+    try:
+        tree = ast.parse(src)
+        dumped = ast.dump(tree, include_attributes=False)
+        return hashlib.sha256(dumped.encode("utf-8")).hexdigest()
+    except Exception:
+        return ""
 
 
 def count_symbols(tree: ast.AST) -> dict[str, int]:
@@ -251,7 +273,13 @@ def guard_python_edit(
             after_content=after_content,
             errors=parse_errors,
             guard_type="parse",
+            ast_hash_before="",
+            ast_hash_after="",
         )
+
+    # Compute AST hashes for additional verification
+    hash_before = _ast_hash(before_content)
+    hash_after = _ast_hash(after_content)
 
     # Layer 2: AST equivalence (if strict)
     if strict:
@@ -264,6 +292,8 @@ def guard_python_edit(
                 after_content=after_content,
                 errors=ast_errors,
                 guard_type="ast_equiv",
+                ast_hash_before=hash_before,
+                ast_hash_after=hash_after,
             )
 
     # Layer 2.5: Symbol counts (PatchGuard v2)
@@ -276,7 +306,17 @@ def guard_python_edit(
             after_content=after_content,
             errors=symbol_errors,
             guard_type="symbol_count",
+            ast_hash_before=hash_before,
+            ast_hash_after=hash_after,
         )
+
+    # Layer 2.6: AST hash check (detect "clever" semantic changes)
+    # If hashes differ but AST equivalence and symbol counts passed,
+    # this indicates a potentially problematic transformation
+    if hash_before and hash_after and hash_before != hash_after:
+        # This is actually expected for most transformations
+        # Only flag if we claimed AST equivalence but hashes differ
+        pass  # Currently informational only
 
     # Layer 3: CST roundtrip
     cst_ok, cst_errors = verify_cst_roundtrip(after_content)
@@ -288,6 +328,8 @@ def guard_python_edit(
             after_content=after_content,
             errors=cst_errors,
             guard_type="cst_apply",
+            ast_hash_before=hash_before,
+            ast_hash_after=hash_after,
         )
 
     # All checks passed
@@ -298,6 +340,8 @@ def guard_python_edit(
         after_content=after_content,
         errors=[],
         guard_type="all",
+        ast_hash_before=hash_before,
+        ast_hash_after=hash_after,
     )
 
 
