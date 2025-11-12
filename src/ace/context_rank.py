@@ -83,8 +83,9 @@ class ContextRanker:
             if file_score:
                 scores.append(file_score)
 
-        # Sort by score descending
-        scores.sort(key=lambda x: x.score, reverse=True)
+        # Sort by score descending, then by file path for determinism
+        # This ensures ties are broken consistently
+        scores.sort(key=lambda x: (-x.score, x.file))
 
         return scores[:limit]
 
@@ -309,8 +310,8 @@ class ContextRanker:
                 )
                 scores.append(file_score)
 
-        # Sort by similarity descending
-        scores.sort(key=lambda x: x.score, reverse=True)
+        # Sort by similarity descending, then by file path for determinism
+        scores.sort(key=lambda x: (-x.score, x.file))
 
         return scores[:limit]
 
@@ -346,5 +347,6 @@ class ContextRanker:
                 if file_score:
                     scores.append(file_score)
 
-        scores.sort(key=lambda x: x.score, reverse=True)
+        # Sort by score descending, then by file path for determinism
+        scores.sort(key=lambda x: (-x.score, x.file))
         return scores[:limit]

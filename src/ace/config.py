@@ -98,19 +98,30 @@ def load_toml_config(config_path: Path) -> dict[str, Any]:
         config_path: Path to ace.toml
 
     Returns:
-        Parsed TOML configuration
+        Parsed TOML configuration, or empty dict if file missing or TOML unavailable
 
     Raises:
-        ImportError: If TOML support is not available
+        ImportError: If TOML support is not available (optional based on usage)
     """
-    if tomllib is None:
-        raise ImportError(
-            "TOML support requires Python 3.11+ or 'tomli' package. "
-            "Install with: pip install tomli"
-        )
+    # Return empty dict if file doesn't exist
+    if not config_path.exists():
+        return {}
 
-    with open(config_path, "rb") as f:
-        return tomllib.load(f)
+    # Return empty dict if TOML library unavailable (graceful degradation)
+    if tomllib is None:
+        import sys
+        print(
+            f"Warning: TOML support unavailable. Install tomli: pip install tomli",
+            file=sys.stderr
+        )
+        return {}
+
+    try:
+        with open(config_path, "rb") as f:
+            return tomllib.load(f)
+    except Exception:
+        # Return empty dict on parse errors
+        return {}
 
 
 def merge_config(
