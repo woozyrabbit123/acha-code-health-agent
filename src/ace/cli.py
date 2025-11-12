@@ -33,13 +33,27 @@ def cmd_analyze(args):
         cache_ttl = args.cache_ttl if hasattr(args, "cache_ttl") else 3600
         cache_dir = args.cache_dir if hasattr(args, "cache_dir") else ".ace"
 
+        # Parallel execution
+        jobs = args.jobs if hasattr(args, "jobs") else 1
+
+        # Performance profiling
+        if hasattr(args, "profile") and args.profile:
+            from ace.perf import get_profiler
+            profiler = get_profiler()
+            profiler.enable()
+
         findings = run_analyze(
             target,
             rules,
             use_cache=use_cache,
             cache_ttl=cache_ttl,
             cache_dir=cache_dir,
+            jobs=jobs,
         )
+
+        # Save profile if requested
+        if hasattr(args, "profile") and args.profile:
+            profiler.save(args.profile)
 
         # Output as JSON
         output = [f.to_dict() for f in findings]
@@ -288,6 +302,12 @@ def main():
         )
         parser_analyze.add_argument(
             "--cache-dir", default=".ace", help="Cache directory (default: .ace)"
+        )
+        parser_analyze.add_argument(
+            "--jobs", type=int, default=1, help="Number of parallel workers (default: 1)"
+        )
+        parser_analyze.add_argument(
+            "--profile", help="Save performance profile to JSON file"
         )
         parser_analyze.set_defaults(func=cmd_analyze)
 
