@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acha.dev/schemas/v1/edit_plan.schema.json",
+  "title": "EditPlan",
+  "description": "Represents a refactoring plan with edits and invariants",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Stable plan identifier",
+      "minLength": 1
+    },
+    "findings": {
+      "type": "array",
+      "description": "Findings addressed by this plan",
+      "items": {
+        "$ref": "unified_issue.schema.json"
+      }
+    },
+    "edits": {
+      "type": "array",
+      "description": "Edit operations in this plan",
+      "items": {
+        "$ref": "edit.schema.json"
+      }
+    },
+    "invariants": {
+      "type": "array",
+      "description": "Invariants that must hold after applying edits",
+      "items": {
+        "type": "string",
+        "enum": ["must_parse", "no_syntax_errors", "idempotent", "preserves_comments"]
+      }
+    },
+    "estimated_risk": {
+      "type": "number",
+      "description": "Risk estimate [0.0, 1.0] where 0.0 is safest",
+      "minimum": 0.0,
+      "maximum": 1.0
+    }
+  },
+  "required": ["id", "findings", "edits", "invariants", "estimated_risk"],
+  "additionalProperties": false
+}

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acha.dev/schemas/v1/unified_issue.schema.json",
+  "title": "UnifiedIssue",
+  "description": "Unified Issue Record for standardized findings across languages",
+  "type": "object",
+  "properties": {
+    "file": {
+      "type": "string",
+      "description": "Source file path (relative or absolute)",
+      "minLength": 1
+    },
+    "line": {
+      "type": "integer",
+      "description": "Line number where issue was found",
+      "minimum": 1
+    },
+    "rule": {
+      "type": "string",
+      "description": "Rule identifier (e.g., PY-E201-BROAD-EXCEPT)",
+      "pattern": "^[A-Z0-9]+-[A-Z0-9]+-[A-Z0-9-]+$"
+    },
+    "severity": {
+      "type": "string",
+      "description": "Severity level",
+      "enum": ["critical", "high", "medium", "low", "info"]
+    },
+    "message": {
+      "type": "string",
+      "description": "Human-readable issue description",
+      "minLength": 1
+    },
+    "suggestion": {
+      "type": "string",
+      "description": "Optional fix suggestion",
+      "default": ""
+    },
+    "snippet": {
+      "type": "string",
+      "description": "Code snippet showing the issue (for stable_id)",
+      "default": ""
+    },
+    "stable_id": {
+      "type": "string",
+      "description": "Deterministic stable ID: <file_crc32>-<rule_crc32>-<snippet_crc32>",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{8}-[0-9a-f]{8}$"
+    }
+  },
+  "required": ["file", "line", "rule", "severity", "message", "stable_id"],
+  "additionalProperties": false
+}

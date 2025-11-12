@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acha.dev/schemas/v1/edit.schema.json",
+  "title": "Edit",
+  "description": "Represents a single edit operation",
+  "type": "object",
+  "properties": {
+    "file": {
+      "type": "string",
+      "description": "File path to edit",
+      "minLength": 1
+    },
+    "start_line": {
+      "type": "integer",
+      "description": "Starting line number (inclusive)",
+      "minimum": 1
+    },
+    "end_line": {
+      "type": "integer",
+      "description": "Ending line number (inclusive)",
+      "minimum": 1
+    },
+    "op": {
+      "type": "string",
+      "description": "Edit operation type",
+      "enum": ["replace", "insert", "delete"]
+    },
+    "payload": {
+      "type": "string",
+      "description": "New content for the edit (empty for delete)"
+    }
+  },
+  "required": ["file", "start_line", "end_line", "op", "payload"],
+  "additionalProperties": false
+}
