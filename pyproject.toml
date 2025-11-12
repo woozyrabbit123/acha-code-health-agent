@@ -46,6 +46,7 @@ dev = [
     "black>=23.0",
     "ruff>=0.1.0",
     "mypy>=1.0",
+    "libcst>=1.4.0",
 ]
 all = [
     "acha-code-health[test,dev,pro,ace]",
