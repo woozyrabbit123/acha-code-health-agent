@@ -1195,6 +1195,148 @@ def cmd_diff(args):
         return ExitCode.OPERATIONAL_ERROR
 
 
+def cmd_pack(args):
+    """Apply codemod packs."""
+    try:
+        from ace.packs_builtin import get_pack, list_packs, apply_pack_to_directory
+        from ace.diffui import interactive_review, apply_approved_changes
+
+        subcommand = args.pack_command if hasattr(args, "pack_command") else None
+
+        if subcommand == "list":
+            # List available packs
+            packs = list_packs()
+            print("Available Codemod Packs:\n")
+            for pack in packs:
+                print(f"  {pack.id}")
+                print(f"    Name: {pack.name}")
+                print(f"    Description: {pack.description}")
+                print(f"    Risk: {pack.risk_level}")
+                print(f"    Category: {pack.category}")
+                print()
+            return ExitCode.SUCCESS
+
+        elif subcommand == "apply":
+            # Apply a pack
+            pack_id = args.pack_id
+            target = Path(args.target) if hasattr(args, "target") else Path(".")
+            interactive = args.interactive if hasattr(args, "interactive") else False
+            dry_run = args.dry_run if hasattr(args, "dry_run") else False
+
+            pack = get_pack(pack_id)
+            if not pack:
+                print(f"Error: Unknown pack '{pack_id}'", file=sys.stderr)
+                return ExitCode.OPERATIONAL_ERROR
+
+            print(f"Applying pack: {pack.name}")
+
+            # Get plans for all files
+            if target.is_file():
+                source_code = target.read_text(encoding='utf-8')
+                from ace.packs_builtin import apply_pack_to_file
+                plan = apply_pack_to_file(pack_id, str(target), source_code)
+                plans = [plan] if plan else []
+            else:
+                plans = apply_pack_to_directory(pack_id, target)
+
+            if not plans:
+                print("No changes needed")
+                return ExitCode.SUCCESS
+
+            print(f"Found {len(plans)} file(s) to modify")
+
+            # Build changes dict
+            changes = {}
+            for plan in plans:
+                for edit in plan.edits:
+                    changes[edit.file] = edit.payload
+
+            # Interactive review or auto-apply
+            if interactive:
+                approved = interactive_review(changes, auto_approve=False)
+            else:
+                approved = set(changes.keys())
+
+            # Apply changes
+            if approved:
+                results = apply_approved_changes(changes, approved, dry_run=dry_run)
+                success_count = sum(1 for v in results.values() if v)
+                print(f"\n{'[DRY RUN] Would apply' if dry_run else 'Applied'}: {success_count} file(s)")
+
+            return ExitCode.SUCCESS
+
+        else:
+            print("Usage: ace pack [list|apply]")
+            return ExitCode.INVALID_ARGS
+
+    except ACEError as e:
+        print(format_error(e), file=sys.stderr)
+        return e.exit_code
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
+def cmd_install_pre_commit(args):
+    """Install pre-commit hook."""
+    try:
+        import os
+        import stat
+
+        git_dir = Path(".git")
+        if not git_dir.exists():
+            print("Error: Not a git repository", file=sys.stderr)
+            return ExitCode.OPERATIONAL_ERROR
+
+        hooks_dir = git_dir / "hooks"
+        hooks_dir.mkdir(exist_ok=True)
+
+        hook_path = hooks_dir / "pre-commit"
+
+        # POSIX pre-commit hook
+        hook_content = """#!/bin/sh
+# ACE pre-commit hook
+
+echo "Running ACE pre-commit checks..."
+
+# Get staged Python files
+STAGED_PY_FILES=$(git diff --cached --name-only --diff-filter=ACMR | grep '\\.py$')
+
+if [ -z "$STAGED_PY_FILES" ]; then
+    echo "No Python files staged, skipping ACE checks"
+    exit 0
+fi
+
+# Run analyze on staged files
+ace analyze --target . --exit-on-violation
+
+if [ $? -ne 0 ]; then
+    echo "ACE analysis found violations. Commit blocked."
+    echo "Run 'ace autopilot' to fix issues automatically."
+    exit 1
+fi
+
+echo "ACE checks passed!"
+exit 0
+"""
+
+        hook_path.write_text(hook_content)
+
+        # Make executable
+        st = hook_path.stat()
+        hook_path.chmod(st.st_mode | stat.S_IEXEC)
+
+        print(f"✓ Pre-commit hook installed at {hook_path}")
+        print("  The hook will run 'ace analyze' on staged Python files")
+        print("  To bypass: git commit --no-verify")
+
+        return ExitCode.SUCCESS
+
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
 def main():
     """Main CLI entry point."""
     # Print personal mode banner
@@ -1733,6 +1875,47 @@ def main():
             help="Don't actually apply changes"
         )
         parser_diff.set_defaults(func=cmd_diff)
+
+        # pack subcommands (v1.6)
+        parser_pack = subparsers.add_parser(
+            "pack", help="Apply codemod packs"
+        )
+        pack_subparsers = parser_pack.add_subparsers(
+            dest="pack_command", help="Pack commands"
+        )
+
+        # pack list
+        parser_pack_list = pack_subparsers.add_parser(
+            "list", help="List available codemod packs"
+        )
+        parser_pack_list.set_defaults(func=cmd_pack)
+
+        # pack apply
+        parser_pack_apply = pack_subparsers.add_parser(
+            "apply", help="Apply a codemod pack"
+        )
+        parser_pack_apply.add_argument(
+            "pack_id", help="Pack ID (e.g., PY_PATHLIB, PY_REQUESTS_HARDEN)"
+        )
+        parser_pack_apply.add_argument(
+            "--target", default=".",
+            help="Target directory or file (default: .)"
+        )
+        parser_pack_apply.add_argument(
+            "--interactive", action="store_true",
+            help="Interactive review (accept/reject per file)"
+        )
+        parser_pack_apply.add_argument(
+            "--dry-run", action="store_true",
+            help="Show changes without applying"
+        )
+        parser_pack_apply.set_defaults(func=cmd_pack)
+
+        # install-pre-commit subcommand (v1.6)
+        parser_install_precommit = subparsers.add_parser(
+            "install-pre-commit", help="Install ACE pre-commit hook"
+        )
+        parser_install_precommit.set_defaults(func=cmd_install_pre_commit)
 
         args = parser.parse_args()
 
