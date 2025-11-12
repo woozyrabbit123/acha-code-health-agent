@@ -213,6 +213,9 @@ workdir/
 reports/
 dist/release.zip
 
+# ACE cache directory
+.ace/
+
 # Test artifacts
 /analysis.json
 /syntax_test.py
