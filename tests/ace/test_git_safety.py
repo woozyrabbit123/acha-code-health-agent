@@ -1,7 +1,6 @@
 """Tests for git safety checks and operations."""
 
 import subprocess
-import tempfile
 from pathlib import Path
 
 import pytest

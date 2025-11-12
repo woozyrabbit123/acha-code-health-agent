@@ -3,9 +3,8 @@
 Receipts provide cryptographic proof and validation records of code transformations.
 """
 
-import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from ace.safety import content_hash
 
@@ -118,7 +117,7 @@ def create_receipt(
     after_hash = after_hash_full.replace("sha256:", "") if after_hash_full.startswith("sha256:") else after_hash_full
 
     # Generate ISO 8601 timestamp in UTC with Z suffix
-    timestamp = datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+    timestamp = datetime.now(UTC).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
 
     return Receipt(
         plan_id=plan_id,

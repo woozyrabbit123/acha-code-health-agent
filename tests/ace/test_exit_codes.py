@@ -5,8 +5,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from ace.errors import ExitCode
 
 

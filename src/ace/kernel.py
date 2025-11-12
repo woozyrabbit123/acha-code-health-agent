@@ -3,6 +3,7 @@
 import time
 from pathlib import Path
 
+from ace import __version__
 from ace.errors import ExitCode
 from ace.fileio import read_text_file, write_text_preserving_style
 from ace.git_safety import check_git_safety, git_commit_changes, git_stash_changes
@@ -21,17 +22,27 @@ from ace.skills.python import (
     validate_python_syntax,
 )
 from ace.skills.shell import analyze_shell_strict_mode
+from ace.storage import AnalysisCache, compute_file_hash, compute_ruleset_hash
 from ace.suppressions import filter_findings_by_suppressions, parse_suppressions
 from ace.uir import UnifiedIssue
 
 
-def run_analyze(target_path: Path | str, rules: list[str] | None = None) -> list[UnifiedIssue]:
+def run_analyze(
+    target_path: Path | str,
+    rules: list[str] | None = None,
+    use_cache: bool = True,
+    cache_ttl: int = 3600,
+    cache_dir: str = ".ace",
+) -> list[UnifiedIssue]:
     """
     Run analysis on target path and collect findings.
 
     Args:
         target_path: Directory or file to analyze (Path or str)
         rules: Optional list of rule IDs to run (None = all rules)
+        use_cache: Whether to use analysis cache (default: True)
+        cache_ttl: Cache TTL in seconds (default: 3600)
+        cache_dir: Cache directory (default: .ace)
 
     Returns:
         List of UnifiedIssue findings
@@ -45,11 +56,24 @@ def run_analyze(target_path: Path | str, rules: list[str] | None = None) -> list
     # Normalize rules filter
     rules_filter = {r.upper() for r in rules} if rules else None
 
+    # Initialize cache if enabled
+    cache = AnalysisCache(cache_dir=cache_dir, ttl=cache_ttl) if use_cache else None
+
+    # Compute ruleset hash for cache key
+    all_rule_ids = [
+        "PY-S101-UNSAFE-HTTP",
+        "PY-E201-BROAD-EXCEPT",
+        "PY-I101-IMPORT-SORT",
+        "MD-S001-DANGEROUS-COMMAND",
+        "YML-F001-DUPLICATE-KEY",
+        "SH-S001-MISSING-STRICT-MODE",
+    ]
+    enabled_rules = [r for r in all_rule_ids if should_run_rule_static(r, rules_filter)]
+    ruleset_hash = compute_ruleset_hash(enabled_rules, __version__)
+
     def should_run_rule(rule_id: str) -> bool:
         """Check if rule should be run based on filter."""
-        if rules_filter is None:
-            return True
-        return rule_id.upper() in rules_filter
+        return should_run_rule_static(rule_id, rules_filter)
 
     if target_path.is_file():
         files = [target_path]
@@ -64,6 +88,19 @@ def run_analyze(target_path: Path | str, rules: list[str] | None = None) -> list
             content, _ = read_text_file(file_path, preserve_newlines=False)
             path_str = str(file_path)
 
+            # Compute file hash for cache key
+            file_hash = compute_file_hash(content)
+
+            # Try cache first
+            if cache:
+                cached_findings = cache.get(path_str, file_hash, ruleset_hash)
+                if cached_findings is not None:
+                    # Cache hit: restore UnifiedIssue objects from dicts
+                    for finding_dict in cached_findings:
+                        all_findings.append(_dict_to_uir(finding_dict))
+                    continue
+
+            # Cache miss: perform analysis
             # Parse suppressions for this file
             suppressions = parse_suppressions(content)
 
@@ -100,6 +137,16 @@ def run_analyze(target_path: Path | str, rules: list[str] | None = None) -> list
 
             # Filter out suppressed findings
             file_findings = filter_findings_by_suppressions(file_findings, suppressions)
+
+            # Store in cache (as dicts for deterministic serialization)
+            if cache and file_findings:
+                cache.set(
+                    path_str,
+                    file_hash,
+                    ruleset_hash,
+                    [f.to_dict() for f in file_findings],
+                )
+
             all_findings.extend(file_findings)
 
         except Exception:
@@ -110,6 +157,28 @@ def run_analyze(target_path: Path | str, rules: list[str] | None = None) -> list
     all_findings.sort(key=lambda f: (f.file, f.line, f.rule))
 
     return all_findings
+
+
+def should_run_rule_static(rule_id: str, rules_filter: set[str] | None) -> bool:
+    """Check if rule should be run based on filter (static helper)."""
+    if rules_filter is None:
+        return True
+    return rule_id.upper() in rules_filter
+
+
+def _dict_to_uir(finding_dict: dict) -> UnifiedIssue:
+    """Convert finding dict back to UnifiedIssue."""
+    from ace.uir import Severity
+
+    return UnifiedIssue(
+        file=finding_dict["file"],
+        line=finding_dict["line"],
+        rule=finding_dict["rule"],
+        severity=Severity(finding_dict["severity"]),
+        message=finding_dict["message"],
+        suggestion=finding_dict.get("suggestion", ""),
+        snippet=finding_dict.get("snippet", ""),
+    )
 
 
 def run_refactor(
