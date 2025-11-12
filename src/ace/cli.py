@@ -963,6 +963,238 @@ def cmd_explain(args):
         return ExitCode.OPERATIONAL_ERROR
 
 
+def cmd_index(args):
+    """Manage symbol index (RepoMap)."""
+    try:
+        from ace.repomap import RepoMap
+
+        subcommand = args.index_command if hasattr(args, "index_command") else None
+        target = Path(args.target) if hasattr(args, "target") else Path(".")
+        index_path = Path(args.index_path) if hasattr(args, "index_path") else Path(".ace/symbols.json")
+
+        if subcommand == "build":
+            # Build symbol index
+            if not target.exists():
+                raise OperationalError(f"Target path does not exist: {target}")
+
+            print(f"Building symbol index for {target}...")
+            import time
+            start = time.time()
+
+            repo_map = RepoMap().build(target)
+            repo_map.save(index_path)
+
+            elapsed = time.time() - start
+            stats = repo_map.stats()
+
+            print(f"✓ Symbol index built in {elapsed:.2f}s")
+            print(f"  Total symbols: {stats['total_symbols']}")
+            print(f"  Total files: {stats['total_files']}")
+            print(f"  By type: {stats['by_type']}")
+            print(f"  Saved to: {index_path}")
+
+            return ExitCode.SUCCESS
+
+        elif subcommand == "query":
+            # Query symbol index
+            if not index_path.exists():
+                raise OperationalError(f"Index not found: {index_path}. Run 'ace index build' first.")
+
+            repo_map = RepoMap.load(index_path)
+
+            pattern = args.pattern if hasattr(args, "pattern") else None
+            type_filter = args.type if hasattr(args, "type") else None
+            limit = args.limit if hasattr(args, "limit") else 50
+
+            results = repo_map.query(pattern=pattern, type=type_filter)
+            results = results[:limit]
+
+            print(json.dumps([s.to_dict() for s in results], indent=2))
+            print(f"\n{len(results)} results", file=sys.stderr)
+
+            return ExitCode.SUCCESS
+
+        else:
+            print("Usage: ace index [build|query]")
+            return ExitCode.INVALID_ARGS
+
+    except ACEError as e:
+        print(format_error(e), file=sys.stderr)
+        return e.exit_code
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
+def cmd_graph(args):
+    """Analyze dependency graph."""
+    try:
+        from ace.repomap import RepoMap
+        from ace.depgraph import DepGraph
+
+        index_path = Path(args.index_path) if hasattr(args, "index_path") else Path(".ace/symbols.json")
+
+        if not index_path.exists():
+            raise OperationalError(f"Index not found: {index_path}. Run 'ace index build' first.")
+
+        repo_map = RepoMap.load(index_path)
+        depgraph = DepGraph(repo_map)
+
+        subcommand = args.graph_command if hasattr(args, "graph_command") else None
+
+        if subcommand == "who-calls":
+            # Find who calls a symbol
+            symbol = args.symbol
+            callers = depgraph.who_calls(symbol)
+
+            print(json.dumps({"symbol": symbol, "callers": callers}, indent=2))
+            print(f"\n{len(callers)} files call '{symbol}'", file=sys.stderr)
+
+            return ExitCode.SUCCESS
+
+        elif subcommand == "depends-on":
+            # Get dependencies of a file
+            file = args.file
+            depth = args.depth if hasattr(args, "depth") else 2
+
+            deps = depgraph.depends_on(file, depth=depth)
+
+            print(json.dumps({"file": file, "dependencies": deps, "depth": depth}, indent=2))
+            print(f"\n{len(deps)} dependencies found", file=sys.stderr)
+
+            return ExitCode.SUCCESS
+
+        elif subcommand == "stats":
+            # Show graph statistics
+            stats = depgraph.stats()
+            print(json.dumps(stats, indent=2))
+
+            return ExitCode.SUCCESS
+
+        else:
+            print("Usage: ace graph [who-calls|depends-on|stats]")
+            return ExitCode.INVALID_ARGS
+
+    except ACEError as e:
+        print(format_error(e), file=sys.stderr)
+        return e.exit_code
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
+def cmd_context(args):
+    """Analyze context and rank files."""
+    try:
+        from ace.repomap import RepoMap
+        from ace.context_rank import ContextRanker
+
+        index_path = Path(args.index_path) if hasattr(args, "index_path") else Path(".ace/symbols.json")
+
+        if not index_path.exists():
+            raise OperationalError(f"Index not found: {index_path}. Run 'ace index build' first.")
+
+        repo_map = RepoMap.load(index_path)
+        ranker = ContextRanker(repo_map)
+
+        subcommand = args.context_command if hasattr(args, "context_command") else None
+
+        if subcommand == "rank":
+            # Rank files by relevance
+            query = args.query if hasattr(args, "query") else None
+            limit = args.limit if hasattr(args, "limit") else 10
+
+            scores = ranker.rank_files(query=query, limit=limit)
+
+            result = {
+                "query": query,
+                "limit": limit,
+                "results": [
+                    {
+                        "file": s.file,
+                        "score": round(s.score, 3),
+                        "symbol_count": s.symbol_count,
+                        "symbol_density": round(s.symbol_density, 3),
+                        "recency_boost": round(s.recency_boost, 3),
+                        "relevance_score": round(s.relevance_score, 3),
+                    }
+                    for s in scores
+                ]
+            }
+
+            print(json.dumps(result, indent=2))
+
+            return ExitCode.SUCCESS
+
+        else:
+            print("Usage: ace context [rank]")
+            return ExitCode.INVALID_ARGS
+
+    except ACEError as e:
+        print(format_error(e), file=sys.stderr)
+        return e.exit_code
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
+def cmd_diff(args):
+    """Interactive diff review and apply."""
+    try:
+        from ace.diffui import interactive_review, apply_approved_changes, parse_patch
+
+        patch_file = Path(args.patch_file)
+
+        if not patch_file.exists():
+            raise OperationalError(f"Patch file does not exist: {patch_file}")
+
+        # Read patch content
+        patch_content = patch_file.read_text(encoding='utf-8')
+
+        # Parse patch
+        patches = parse_patch(patch_content)
+
+        if not patches:
+            print("No changes found in patch file")
+            return ExitCode.SUCCESS
+
+        # Convert to changes dict
+        changes = {file: patch.new_content for file, patch in patches.items()}
+
+        # Interactive review
+        interactive = args.interactive if hasattr(args, "interactive") else False
+        dry_run = args.dry_run if hasattr(args, "dry_run") else False
+
+        if interactive:
+            approved = interactive_review(changes, auto_approve=False)
+        else:
+            approved = set(changes.keys())
+
+        # Apply approved changes
+        if approved:
+            results = apply_approved_changes(changes, approved, dry_run=dry_run)
+
+            success_count = sum(1 for v in results.values() if v)
+            fail_count = len(results) - success_count
+
+            print(f"\n{'Dry run:' if dry_run else 'Applied:'} {success_count} file(s)")
+            if fail_count > 0:
+                print(f"Failed: {fail_count} file(s)", file=sys.stderr)
+                return ExitCode.OPERATIONAL_ERROR
+
+            return ExitCode.SUCCESS
+        else:
+            print("No changes approved")
+            return ExitCode.SUCCESS
+
+    except ACEError as e:
+        print(format_error(e), file=sys.stderr)
+        return e.exit_code
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
 def main():
     """Main CLI entry point."""
     # Print personal mode banner
@@ -1369,6 +1601,138 @@ def main():
             "reset", help="Reset all learning data"
         )
         parser_learn_reset.set_defaults(func=cmd_learn)
+
+        # index subcommands (v1.5)
+        parser_index = subparsers.add_parser(
+            "index", help="Manage symbol index (RepoMap)"
+        )
+        index_subparsers = parser_index.add_subparsers(
+            dest="index_command", help="Index commands"
+        )
+
+        # index build
+        parser_index_build = index_subparsers.add_parser(
+            "build", help="Build symbol index"
+        )
+        parser_index_build.add_argument(
+            "--target", default=".", help="Target directory to index (default: .)"
+        )
+        parser_index_build.add_argument(
+            "--index-path", default=".ace/symbols.json",
+            help="Index output path (default: .ace/symbols.json)"
+        )
+        parser_index_build.set_defaults(func=cmd_index)
+
+        # index query
+        parser_index_query = index_subparsers.add_parser(
+            "query", help="Query symbol index"
+        )
+        parser_index_query.add_argument(
+            "--pattern", help="Symbol name pattern (substring match)"
+        )
+        parser_index_query.add_argument(
+            "--type", choices=["function", "class", "module"],
+            help="Filter by symbol type"
+        )
+        parser_index_query.add_argument(
+            "--limit", type=int, default=50,
+            help="Maximum results (default: 50)"
+        )
+        parser_index_query.add_argument(
+            "--index-path", default=".ace/symbols.json",
+            help="Index file path (default: .ace/symbols.json)"
+        )
+        parser_index_query.set_defaults(func=cmd_index)
+
+        # graph subcommands (v1.5)
+        parser_graph = subparsers.add_parser(
+            "graph", help="Analyze dependency graph"
+        )
+        graph_subparsers = parser_graph.add_subparsers(
+            dest="graph_command", help="Graph commands"
+        )
+
+        # graph who-calls
+        parser_graph_who_calls = graph_subparsers.add_parser(
+            "who-calls", help="Find files that call a symbol"
+        )
+        parser_graph_who_calls.add_argument(
+            "symbol", help="Symbol name to search for"
+        )
+        parser_graph_who_calls.add_argument(
+            "--index-path", default=".ace/symbols.json",
+            help="Index file path (default: .ace/symbols.json)"
+        )
+        parser_graph_who_calls.set_defaults(func=cmd_graph)
+
+        # graph depends-on
+        parser_graph_depends_on = graph_subparsers.add_parser(
+            "depends-on", help="Get dependencies of a file"
+        )
+        parser_graph_depends_on.add_argument(
+            "file", help="File path to analyze"
+        )
+        parser_graph_depends_on.add_argument(
+            "--depth", type=int, default=2,
+            help="Dependency depth (default: 2, -1 for unlimited)"
+        )
+        parser_graph_depends_on.add_argument(
+            "--index-path", default=".ace/symbols.json",
+            help="Index file path (default: .ace/symbols.json)"
+        )
+        parser_graph_depends_on.set_defaults(func=cmd_graph)
+
+        # graph stats
+        parser_graph_stats = graph_subparsers.add_parser(
+            "stats", help="Show dependency graph statistics"
+        )
+        parser_graph_stats.add_argument(
+            "--index-path", default=".ace/symbols.json",
+            help="Index file path (default: .ace/symbols.json)"
+        )
+        parser_graph_stats.set_defaults(func=cmd_graph)
+
+        # context subcommands (v1.5)
+        parser_context = subparsers.add_parser(
+            "context", help="Analyze context and rank files"
+        )
+        context_subparsers = parser_context.add_subparsers(
+            dest="context_command", help="Context commands"
+        )
+
+        # context rank
+        parser_context_rank = context_subparsers.add_parser(
+            "rank", help="Rank files by relevance"
+        )
+        parser_context_rank.add_argument(
+            "--query", help="Search query for relevance scoring"
+        )
+        parser_context_rank.add_argument(
+            "--limit", type=int, default=10,
+            help="Maximum results (default: 10)"
+        )
+        parser_context_rank.add_argument(
+            "--index-path", default=".ace/symbols.json",
+            help="Index file path (default: .ace/symbols.json)"
+        )
+        parser_context_rank.set_defaults(func=cmd_context)
+
+        # diff subcommand (v1.5)
+        parser_diff = subparsers.add_parser(
+            "diff", help="Interactive diff review and apply"
+        )
+        parser_diff.add_argument(
+            "patch_file", help="Patch file to review"
+        )
+        parser_diff.add_argument(
+            "--interactive", action="store_true",
+            help="Enable interactive review (accept/reject per file)"
+        )
+        parser_diff.add_argument(
+            "--dry-run", action="store_true",
+            help="Don't actually apply changes"
+        )
+        parser_diff.set_defaults(func=cmd_diff)
 
         args = parser.parse_args()
 

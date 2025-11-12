@@ -21,6 +21,16 @@ from ace.skiplist import Skiplist
 from ace.telemetry import get_cost_ms_rank
 from ace.uir import UnifiedIssue
 
+# v1.5: Context engine imports
+try:
+    from ace.repomap import RepoMap
+    from ace.context_rank import ContextRanker
+    from ace.depgraph import DepGraph
+    from ace.impact import ImpactAnalyzer
+    CONTEXT_ENGINE_AVAILABLE = True
+except ImportError:
+    CONTEXT_ENGINE_AVAILABLE = False
+
 
 @dataclass
 class AutopilotConfig:
@@ -81,6 +91,38 @@ def run_autopilot(cfg: AutopilotConfig) -> tuple[ExitCode, AutopilotStats]:
         index = ContentIndex()
         if cfg.incremental:
             index.load()
+
+        # v1.5: Load context engine (RepoMap) if available
+        repo_map = None
+        context_ranker = None
+        depgraph = None
+        impact_analyzer = None
+
+        symbols_path = Path(".ace/symbols.json")
+        if CONTEXT_ENGINE_AVAILABLE:
+            # Load or build if --deep and symbols are stale (>24h)
+            should_rebuild = False
+            if cfg.deep and symbols_path.exists():
+                import time
+                symbols_age = time.time() - symbols_path.stat().st_mtime
+                if symbols_age > 86400:  # 24 hours
+                    should_rebuild = True
+
+            if should_rebuild or (cfg.deep and not symbols_path.exists()):
+                if not cfg.silent:
+                    print("Building symbol index (--deep mode)...")
+                repo_map = RepoMap().build(cfg.target if cfg.target.is_dir() else cfg.target.parent)
+                repo_map.save(symbols_path)
+            elif symbols_path.exists():
+                if not cfg.silent:
+                    print("RepoMap loaded")
+                repo_map = RepoMap.load(symbols_path)
+
+            # Initialize context engine components if repo_map is available
+            if repo_map:
+                context_ranker = ContextRanker(repo_map)
+                depgraph = DepGraph(repo_map)
+                impact_analyzer = ImpactAnalyzer(depgraph)
 
         # Step 3: Build file list (respects .aceignore, size>5MB skip)
         if cfg.target.is_file():
@@ -217,7 +259,40 @@ def run_autopilot(cfg: AutopilotConfig) -> tuple[ExitCode, AutopilotStats]:
             if learning.should_skip_context(ctx_key, threshold=0.5):
                 revisit_penalty = 20.0  # Significant penalty for previously reverted contexts
 
-            priority = base_priority - cost_penalty - revisit_penalty
+            # v1.5: Context ranking boost
+            context_boost = 0.0
+            if context_ranker and hasattr(plan, 'edits') and plan.edits:
+                # Get files affected by this plan
+                affected_files = list(set(edit.file_path for edit in plan.edits))
+
+                # Score each file
+                total_score = 0.0
+                for file_path in affected_files:
+                    # Try to get relative path
+                    try:
+                        rel_path = str(Path(file_path).relative_to(cfg.target))
+                    except ValueError:
+                        rel_path = str(file_path)
+
+                    # Get file symbols and calculate density/recency
+                    file_symbols = repo_map.get_file_symbols(rel_path)
+                    if file_symbols:
+                        # Use ranker's scoring components
+                        file_score = context_ranker._score_file(
+                            rel_path,
+                            query=None,
+                            recency_weight=0.3,
+                            density_weight=0.5,
+                            relevance_weight=0.0
+                        )
+                        if file_score:
+                            total_score += file_score.score
+
+                # Average boost across files (weight 0.2 to avoid dominating)
+                if affected_files:
+                    context_boost = (total_score / len(affected_files)) * 5.0  # Scale up to ~5 points max
+
+            priority = base_priority - cost_penalty - revisit_penalty + context_boost
 
             return priority
 
