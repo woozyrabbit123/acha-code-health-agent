@@ -65,6 +65,36 @@ def verify_python_parse(content: str) -> tuple[bool, list[str]]:
     return True, []
 
 
+def count_symbols(tree: ast.AST) -> dict[str, int]:
+    """
+    Count symbols in an AST tree.
+
+    Args:
+        tree: AST tree
+
+    Returns:
+        Dictionary with symbol counts
+    """
+    counts = {
+        "functions": 0,
+        "classes": 0,
+        "imports": 0,
+        "assignments": 0
+    }
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            counts["functions"] += 1
+        elif isinstance(node, ast.ClassDef):
+            counts["classes"] += 1
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            counts["imports"] += 1
+        elif isinstance(node, ast.Assign):
+            counts["assignments"] += 1
+
+    return counts
+
+
 def verify_ast_equivalence(before: str, after: str) -> tuple[bool, list[str]]:
     """
     Verify AST equivalence between before and after code.
@@ -94,6 +124,57 @@ def verify_ast_equivalence(before: str, after: str) -> tuple[bool, list[str]]:
 
     if dump_before != dump_after:
         errors.append("AST structures differ (semantic change detected)")
+        return False, errors
+
+    return True, []
+
+
+def verify_symbol_counts(before: str, after: str, allow_import_changes: bool = True) -> tuple[bool, list[str]]:
+    """
+    Verify symbol table counts match (PatchGuard v2).
+
+    Ensures that the number of functions and classes remains the same,
+    preventing accidental deletions or duplications.
+
+    Args:
+        before: Original code
+        after: Modified code
+        allow_import_changes: If True, allow import count changes (default: True)
+
+    Returns:
+        Tuple of (equivalent, errors)
+    """
+    errors = []
+
+    try:
+        ast_before = ast.parse(before)
+        ast_after = ast.parse(after)
+    except SyntaxError as e:
+        errors.append(f"Parse error during symbol count: {e}")
+        return False, errors
+
+    counts_before = count_symbols(ast_before)
+    counts_after = count_symbols(ast_after)
+
+    # Check function count
+    if counts_before["functions"] != counts_after["functions"]:
+        errors.append(
+            f"Function count changed: {counts_before['functions']} → {counts_after['functions']}"
+        )
+
+    # Check class count
+    if counts_before["classes"] != counts_after["classes"]:
+        errors.append(
+            f"Class count changed: {counts_before['classes']} → {counts_after['classes']}"
+        )
+
+    # Check import count (optional)
+    if not allow_import_changes and counts_before["imports"] != counts_after["imports"]:
+        errors.append(
+            f"Import count changed: {counts_before['imports']} → {counts_after['imports']}"
+        )
+
+    if errors:
         return False, errors
 
     return True, []
@@ -140,11 +221,12 @@ def guard_python_edit(
     strict: bool = True,
 ) -> GuardResult:
     """
-    Guard Python edit with multiple verification layers.
+    Guard Python edit with multiple verification layers (PatchGuard v2).
 
     Verification layers:
     1. Parse check: After code must parse successfully
     2. AST equivalence: Before and after must have same AST (if strict=True)
+    2.5. Symbol counts: Function and class counts must match (PatchGuard v2)
     3. CST roundtrip: After code must roundtrip cleanly through CST
 
     Args:
@@ -183,6 +265,18 @@ def guard_python_edit(
                 errors=ast_errors,
                 guard_type="ast_equiv",
             )
+
+    # Layer 2.5: Symbol counts (PatchGuard v2)
+    symbol_ok, symbol_errors = verify_symbol_counts(before_content, after_content, allow_import_changes=True)
+    if not symbol_ok:
+        return GuardResult(
+            passed=False,
+            file=file_path_str,
+            before_content=before_content,
+            after_content=after_content,
+            errors=symbol_errors,
+            guard_type="symbol_count",
+        )
 
     # Layer 3: CST roundtrip
     cst_ok, cst_errors = verify_cst_roundtrip(after_content)
