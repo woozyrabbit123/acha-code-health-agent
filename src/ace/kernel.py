@@ -54,6 +54,7 @@ from ace.skills.style import (
 from ace.storage import AnalysisCache, compute_file_hash, compute_ruleset_hash
 from ace.suppressions import filter_findings_by_suppressions, parse_suppressions
 from ace.telemetry import time_block, Telemetry
+from ace.telemetry import Telemetry as TelemetryTracker  # For explicit tracking in run_apply
 from ace.uir import UnifiedIssue
 
 
@@ -525,6 +526,9 @@ def run_apply(
     learning = LearningEngine()
     learning.load()
 
+    # v1.7: Initialize telemetry for tracking apply operations
+    telemetry_tracker = TelemetryTracker()
+
     modified_files = []
     receipts = []
 
@@ -698,6 +702,16 @@ def run_apply(
                 duration_ms=duration_ms,
             )
             receipts.append(receipt)
+
+            # v1.7: Record telemetry for apply operation
+            for rule_id in rule_ids:
+                telemetry_tracker.record(
+                    rule_id=rule_id,
+                    duration_ms=duration_ms,
+                    files=1,
+                    ok=parse_valid and not reverted,
+                    reverted=reverted,
+                )
 
             # Log success in journal (only if not reverted)
             if not reverted and not dry_run:

@@ -36,6 +36,7 @@ ace = [
     "libcst>=1.4.0",
     "markdown-it-py>=3.0.0",
     "pyyaml>=6.0.1",
+    "textual>=0.41.0",
 ]
 test = [
     "pytest>=7.0",

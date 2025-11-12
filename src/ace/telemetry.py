@@ -2,29 +2,38 @@
 Performance telemetry for ACE - track rule execution times.
 
 Lightweight timers that write to .ace/telemetry.jsonl for performance analysis.
+
+v2 enhancements:
+- Append JSONL {rule_id, ms, files, ok, reverted} per execution
+- summary(days=7) aggregates mean, p95, count
 """
 
 import json
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
 
 
 @dataclass
 class RuleTiming:
-    """Timing data for a single rule execution."""
+    """Timing data for a single rule execution (v2 with extended metadata)."""
 
     rule_id: str
     duration_ms: float
     timestamp: float
+    files: int = 0  # v2: Number of files processed
+    ok: bool = True  # v2: Execution succeeded
+    reverted: bool = False  # v2: Was this execution reverted
 
 
 @dataclass
 class TelemetryStats:
-    """Aggregated telemetry statistics."""
+    """Aggregated telemetry statistics (v2 with p95)."""
 
     per_rule_avg_ms: dict[str, float] = field(default_factory=dict)
+    per_rule_p95_ms: dict[str, float] = field(default_factory=dict)  # v2
     per_rule_count: dict[str, int] = field(default_factory=dict)
     total_executions: int = 0
 
@@ -44,44 +53,69 @@ class Telemetry:
         """Ensure parent directory exists."""
         self.telemetry_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def record(self, rule_id: str, duration_ms: float) -> None:
+    def record(
+        self,
+        rule_id: str,
+        duration_ms: float,
+        files: int = 0,
+        ok: bool = True,
+        reverted: bool = False,
+    ) -> None:
         """
-        Record a rule execution timing.
+        Record a rule execution timing (v2 with extended metadata).
 
         Args:
             rule_id: Rule identifier (e.g., "PY-S101-UNSAFE-HTTP")
             duration_ms: Execution duration in milliseconds
+            files: Number of files processed (v2)
+            ok: Execution succeeded (v2)
+            reverted: Was this execution reverted (v2)
         """
         # Create timing entry
         timing = RuleTiming(
             rule_id=rule_id,
             duration_ms=duration_ms,
-            timestamp=time.time()
+            timestamp=time.time(),
+            files=files,
+            ok=ok,
+            reverted=reverted,
         )
 
-        # Write to JSONL (append mode)
+        # Write to JSONL (append mode) with v2 fields
         with open(self.telemetry_path, "a", encoding="utf-8") as f:
             entry = {
                 "rule_id": timing.rule_id,
-                "duration_ms": timing.duration_ms,
-                "timestamp": timing.timestamp
+                "ms": timing.duration_ms,  # v2: renamed from duration_ms for brevity
+                "timestamp": timing.timestamp,
+                "files": timing.files,
+                "ok": timing.ok,
+                "reverted": timing.reverted,
             }
             f.write(json.dumps(entry, sort_keys=True) + "\n")
 
-    def load_stats(self) -> TelemetryStats:
+    def load_stats(self, days: int | None = None) -> TelemetryStats:
         """
-        Load and aggregate telemetry statistics.
+        Load and aggregate telemetry statistics (v2 with p95).
+
+        Args:
+            days: Optional filter for last N days (None = all time)
 
         Returns:
-            TelemetryStats with per-rule averages and counts
+            TelemetryStats with per-rule averages, p95, and counts
         """
         stats = TelemetryStats()
 
         if not self.telemetry_path.exists():
             return stats
 
-        # Accumulators for averaging
+        # v2: Time filter
+        cutoff_time = None
+        if days is not None:
+            cutoff_time = time.time() - (days * 24 * 3600)
+
+        # Accumulators for averaging and p95
         total_durations: dict[str, float] = {}
+        all_durations: dict[str, list[float]] = {}  # v2: For p95 calculation
         counts: dict[str, int] = {}
 
         try:
@@ -93,14 +127,22 @@ class Telemetry:
                     try:
                         entry = json.loads(line)
                         rule_id = entry["rule_id"]
-                        duration_ms = entry["duration_ms"]
+                        # Handle both old and new format
+                        duration_ms = entry.get("ms", entry.get("duration_ms", 0))
+                        timestamp = entry.get("timestamp", 0)
+
+                        # v2: Apply time filter
+                        if cutoff_time is not None and timestamp < cutoff_time:
+                            continue
 
                         # Accumulate
                         if rule_id not in total_durations:
                             total_durations[rule_id] = 0.0
+                            all_durations[rule_id] = []
                             counts[rule_id] = 0
 
                         total_durations[rule_id] += duration_ms
+                        all_durations[rule_id].append(duration_ms)
                         counts[rule_id] += 1
                         stats.total_executions += 1
 
@@ -112,13 +154,32 @@ class Telemetry:
             # If file can't be read, return empty stats
             return stats
 
-        # Calculate averages
+        # Calculate averages and p95
         for rule_id in total_durations:
             if counts[rule_id] > 0:
                 stats.per_rule_avg_ms[rule_id] = total_durations[rule_id] / counts[rule_id]
                 stats.per_rule_count[rule_id] = counts[rule_id]
 
+                # v2: Calculate p95
+                durations = sorted(all_durations[rule_id])
+                p95_index = int(len(durations) * 0.95)
+                if p95_index >= len(durations):
+                    p95_index = len(durations) - 1
+                stats.per_rule_p95_ms[rule_id] = durations[p95_index] if durations else 0.0
+
         return stats
+
+    def summary(self, days: int = 7) -> TelemetryStats:
+        """
+        Get summary statistics for the last N days.
+
+        Args:
+            days: Number of days to aggregate (default: 7)
+
+        Returns:
+            TelemetryStats with mean, p95, and count per rule
+        """
+        return self.load_stats(days=days)
 
     def get_top_slow_rules(self, limit: int = 10) -> list[tuple[str, float, int]]:
         """

@@ -162,6 +162,14 @@ def run_autopilot(cfg: AutopilotConfig) -> tuple[ExitCode, AutopilotStats]:
         # Step 5: Apply skiplist filtering
         findings = skiplist.filter_findings(findings)
 
+        # v1.7: Apply auto-skiplist from learning
+        filtered_findings = []
+        for finding in findings:
+            should_skip = learning.should_skip_file_for_rule(finding.rule, finding.file)
+            if not should_skip:
+                filtered_findings.append(finding)
+        findings = filtered_findings
+
         if not findings:
             if not cfg.silent:
                 print("✓ No actionable findings (all in skiplist)")
@@ -292,7 +300,21 @@ def run_autopilot(cfg: AutopilotConfig) -> tuple[ExitCode, AutopilotStats]:
                 if affected_files:
                     context_boost = (total_score / len(affected_files)) * 5.0  # Scale up to ~5 points max
 
-            priority = base_priority - cost_penalty - revisit_penalty + context_boost
+            # v1.7: Success rate bonus (prefer high-success rules)
+            success_rate_bonus = 0.0
+            if rule_ids:
+                success_rates = []
+                for rule_id in rule_ids:
+                    if rule_id in learning.data.rules:
+                        stats_obj = learning.data.rules[rule_id]
+                        if stats_obj.sample_size() >= 5:  # Only consider rules with enough samples
+                            success_rates.append(stats_obj.success_rate())
+
+                if success_rates:
+                    avg_success_rate = sum(success_rates) / len(success_rates)
+                    success_rate_bonus = avg_success_rate * 10.0  # Scale to ~10 points max
+
+            priority = base_priority - cost_penalty - revisit_penalty + context_boost + success_rate_bonus
 
             return priority
 
@@ -344,6 +366,15 @@ def run_autopilot(cfg: AutopilotConfig) -> tuple[ExitCode, AutopilotStats]:
         for receipt in receipts:
             # Estimate lines from risk and plan data
             stats.lines_modified += 1  # Simplified count
+
+        # v1.7: Record applied outcomes in learning (with file_path for auto-skiplist)
+        for receipt in receipts:
+            # Extract rule_id from receipt metadata
+            rule_id = receipt.metadata.get("rule_id") if hasattr(receipt, "metadata") and isinstance(receipt.metadata, dict) else None
+            if not rule_id and hasattr(receipt, "rule"):
+                rule_id = receipt.rule
+            if rule_id:
+                learning.record_outcome(rule_id, "applied", context_key=None, file_path=receipt.file)
 
         # Step 11: Verify receipts and update index
         if cfg.incremental:

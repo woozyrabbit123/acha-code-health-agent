@@ -3,11 +3,18 @@ Self-learning module for ACE - adaptive thresholds and personal memory.
 
 Learns from user actions (reverts, skips, allow/deny) and adapts thresholds per-repo.
 No ML, just robust counters and moving averages. Offline only.
+
+v2 enhancements:
+- Per-rule success_rate, revert_rate, sample_size tracking
+- Auto-skiplist patterns on 3 consecutive reverts per (rule,file)
+- Weekly decay 0.8
+- Tuned threshold clamped 0.60-0.85
 """
 
 import hashlib
 import json
-from collections import deque
+import time
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -21,18 +28,25 @@ THRESHOLD_DELTA = 0.05
 HIGH_REVERT_RATE = 0.25  # 25%
 HIGH_APPLY_RATE = 0.80  # 80%
 WINDOW_SIZE = 20  # Look at last 20 events for rate calculation
+MIN_SAMPLE_SIZE = 5  # Minimum sample size for threshold tuning
+WEEKLY_DECAY = 0.8  # Weekly decay factor for time-based weighting
+REVERT_THRESHOLD_SKIPLIST = 3  # Consecutive reverts before auto-skiplist
 
 OutcomeType = Literal["applied", "reverted", "suggested", "skipped"]
 
 
 @dataclass
 class RuleStats:
-    """Statistics for a single rule."""
+    """Statistics for a single rule (v2 with enhanced tracking)."""
 
     applied: int = 0
     reverted: int = 0
     suggested: int = 0
     skipped: int = 0
+    # v2: Track timestamps for time-weighted decay
+    last_updated: float = 0.0  # Unix timestamp
+    # v2: Track consecutive reverts per file for auto-skiplist
+    consecutive_reverts: dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -40,6 +54,8 @@ class RuleStats:
             "reverted": self.reverted,
             "suggested": self.suggested,
             "skipped": self.skipped,
+            "last_updated": self.last_updated,
+            "consecutive_reverts": self.consecutive_reverts,
         }
 
     @staticmethod
@@ -49,11 +65,17 @@ class RuleStats:
             reverted=data.get("reverted", 0),
             suggested=data.get("suggested", 0),
             skipped=data.get("skipped", 0),
+            last_updated=data.get("last_updated", 0.0),
+            consecutive_reverts=data.get("consecutive_reverts", {}),
         )
 
     def total_actions(self) -> int:
         """Total number of actions (applied + reverted)."""
         return self.applied + self.reverted
+
+    def sample_size(self) -> int:
+        """Sample size for statistical significance."""
+        return self.total_actions()
 
     def revert_rate(self) -> float:
         """Calculate revert rate (reverts / total_actions)."""
@@ -62,12 +84,33 @@ class RuleStats:
             return 0.0
         return self.reverted / total
 
-    def apply_rate(self) -> float:
-        """Calculate apply rate (applied / total_actions)."""
+    def success_rate(self) -> float:
+        """Calculate success rate (applied / total_actions)."""
         total = self.total_actions()
         if total == 0:
             return 0.0
         return self.applied / total
+
+    def apply_rate(self) -> float:
+        """Calculate apply rate (applied / total_actions) - alias for success_rate."""
+        return self.success_rate()
+
+    def apply_decay(self, weeks_elapsed: float, decay_factor: float = WEEKLY_DECAY) -> None:
+        """
+        Apply time-based decay to statistics.
+
+        Args:
+            weeks_elapsed: Number of weeks since last update
+            decay_factor: Decay multiplier per week (default: 0.8)
+        """
+        if weeks_elapsed <= 0:
+            return
+
+        multiplier = decay_factor ** weeks_elapsed
+        self.applied = int(self.applied * multiplier)
+        self.reverted = int(self.reverted * multiplier)
+        self.suggested = int(self.suggested * multiplier)
+        self.skipped = int(self.skipped * multiplier)
 
 
 @dataclass
@@ -96,7 +139,7 @@ class ContextStats:
 
 @dataclass
 class LearningData:
-    """Complete learning data structure."""
+    """Complete learning data structure (v2 with auto-skiplist)."""
 
     rules: dict[str, RuleStats] = field(default_factory=dict)
     contexts: dict[str, ContextStats] = field(default_factory=dict)
@@ -106,6 +149,8 @@ class LearningData:
         "min_auto": DEFAULT_MIN_AUTO,
         "min_suggest": DEFAULT_MIN_SUGGEST,
     })
+    # v2: Auto-skiplist patterns (rule_id -> list of file patterns)
+    auto_skiplist: dict[str, list[str]] = field(default_factory=dict)
     # Event history for moving average (not persisted, computed on-the-fly)
     _event_history: dict[str, deque] = field(default_factory=dict, repr=False)
 
@@ -114,6 +159,7 @@ class LearningData:
             "rules": {rule_id: stats.to_dict() for rule_id, stats in self.rules.items()},
             "contexts": {ctx_key: stats.to_dict() for ctx_key, stats in self.contexts.items()},
             "tuning": self.tuning,
+            "auto_skiplist": self.auto_skiplist,
         }
 
     @staticmethod
@@ -133,6 +179,7 @@ class LearningData:
             "min_auto": DEFAULT_MIN_AUTO,
             "min_suggest": DEFAULT_MIN_SUGGEST,
         })
+        learning.auto_skiplist = data.get("auto_skiplist", {})
         return learning
 
 
@@ -171,14 +218,17 @@ class LearningEngine:
             json.dump(self.data.to_dict(), f, indent=2, sort_keys=True)
             f.write("\n")  # Trailing newline
 
-    def record_outcome(self, rule_id: str, outcome: OutcomeType, context_key: str | None = None) -> None:
+    def record_outcome(
+        self, rule_id: str, outcome: OutcomeType, context_key: str | None = None, file_path: str | None = None
+    ) -> None:
         """
-        Record an outcome for a rule.
+        Record an outcome for a rule (v2 with auto-skiplist and decay).
 
         Args:
             rule_id: Rule identifier (e.g., "PY-E201-BROAD-EXCEPT")
             outcome: One of "applied", "reverted", "suggested", "skipped"
             context_key: Optional context key for fine-grained tracking
+            file_path: Optional file path for auto-skiplist tracking
         """
         # Ensure rule stats exist
         if rule_id not in self.data.rules:
@@ -186,11 +236,30 @@ class LearningEngine:
 
         stats = self.data.rules[rule_id]
 
+        # v2: Apply weekly decay before updating
+        current_time = time.time()
+        if stats.last_updated > 0:
+            weeks_elapsed = (current_time - stats.last_updated) / (7 * 24 * 3600)
+            if weeks_elapsed > 0.1:  # Only decay if > ~7 hours
+                stats.apply_decay(weeks_elapsed, WEEKLY_DECAY)
+
+        # Update timestamp
+        stats.last_updated = current_time
+
         # Update counters
         if outcome == "applied":
             stats.applied += 1
+            # Reset consecutive reverts for this file
+            if file_path and file_path in stats.consecutive_reverts:
+                stats.consecutive_reverts[file_path] = 0
         elif outcome == "reverted":
             stats.reverted += 1
+            # v2: Track consecutive reverts for auto-skiplist
+            if file_path:
+                stats.consecutive_reverts[file_path] = stats.consecutive_reverts.get(file_path, 0) + 1
+                # Add to auto-skiplist if threshold reached
+                if stats.consecutive_reverts[file_path] >= REVERT_THRESHOLD_SKIPLIST:
+                    self._add_to_auto_skiplist(rule_id, file_path)
         elif outcome == "suggested":
             stats.suggested += 1
         elif outcome == "skipped":
@@ -209,14 +278,67 @@ class LearningEngine:
         # Save after each update
         self.save()
 
+    def _add_to_auto_skiplist(self, rule_id: str, file_path: str) -> None:
+        """
+        Add a file pattern to auto-skiplist for a rule.
+
+        Args:
+            rule_id: Rule identifier
+            file_path: File path that triggered skiplist
+        """
+        if rule_id not in self.data.auto_skiplist:
+            self.data.auto_skiplist[rule_id] = []
+
+        # Add file pattern if not already present
+        if file_path not in self.data.auto_skiplist[rule_id]:
+            self.data.auto_skiplist[rule_id].append(file_path)
+
+    def tuned_threshold(self, rule_id: str) -> float:
+        """
+        Calculate tuned threshold for a rule based on learning history (v2).
+
+        Logic:
+        - Start with default (0.70 for auto)
+        - Require minimum sample size of 5
+        - If revert rate > 25%, raise threshold by +0.05 (cap 0.85)
+        - If apply rate > 80%, lower threshold by -0.05 (floor 0.60)
+
+        Args:
+            rule_id: Rule identifier
+
+        Returns:
+            Tuned threshold clamped to [0.60, 0.85]
+        """
+        if rule_id not in self.data.rules:
+            return DEFAULT_MIN_AUTO
+
+        stats = self.data.rules[rule_id]
+
+        # Start with default
+        min_auto = self.data.tuning.get("min_auto", DEFAULT_MIN_AUTO)
+
+        # Calculate rates
+        revert_rate = stats.revert_rate()
+        success_rate = stats.success_rate()
+
+        # v2: Only adjust if we have enough data (minimum sample size)
+        if stats.sample_size() < MIN_SAMPLE_SIZE:
+            return min_auto
+
+        # High revert rate → raise threshold (be more conservative)
+        if revert_rate > HIGH_REVERT_RATE:
+            min_auto = min(min_auto + THRESHOLD_DELTA, CEIL_MIN_AUTO)
+
+        # High success rate → lower threshold (be more aggressive)
+        elif success_rate > HIGH_APPLY_RATE:
+            min_auto = max(min_auto - THRESHOLD_DELTA, FLOOR_MIN_AUTO)
+
+        # v2: Clamp to [0.60, 0.85]
+        return max(FLOOR_MIN_AUTO, min(min_auto, CEIL_MIN_AUTO))
+
     def tuned_thresholds(self, rule_id: str) -> tuple[float, float]:
         """
         Calculate tuned thresholds for a rule based on learning history.
-
-        Logic:
-        - Start with defaults (0.70 for auto, 0.50 for suggest)
-        - If revert rate > 25% over last actions, raise min_auto by +0.05 (cap 0.85)
-        - If apply rate > 80% over last actions, lower min_auto by -0.05 (floor 0.60)
 
         Args:
             rule_id: Rule identifier
@@ -224,32 +346,8 @@ class LearningEngine:
         Returns:
             Tuple of (min_auto_threshold, min_suggest_threshold)
         """
-        if rule_id not in self.data.rules:
-            return (DEFAULT_MIN_AUTO, DEFAULT_MIN_SUGGEST)
-
-        stats = self.data.rules[rule_id]
-
-        # Start with defaults
-        min_auto = self.data.tuning.get("min_auto", DEFAULT_MIN_AUTO)
+        min_auto = self.tuned_threshold(rule_id)
         min_suggest = self.data.tuning.get("min_suggest", DEFAULT_MIN_SUGGEST)
-
-        # Calculate rates (using all history, not windowed for simplicity)
-        revert_rate = stats.revert_rate()
-        apply_rate = stats.apply_rate()
-
-        # Only adjust if we have enough data (at least 5 actions)
-        total_actions = stats.total_actions()
-        if total_actions < 5:
-            return (min_auto, min_suggest)
-
-        # High revert rate → raise threshold (be more conservative)
-        if revert_rate > HIGH_REVERT_RATE:
-            min_auto = min(min_auto + THRESHOLD_DELTA, CEIL_MIN_AUTO)
-
-        # High apply rate → lower threshold (be more aggressive)
-        elif apply_rate > HIGH_APPLY_RATE:
-            min_auto = max(min_auto - THRESHOLD_DELTA, FLOOR_MIN_AUTO)
-
         return (min_auto, min_suggest)
 
     def should_skip_context(self, context_key: str, threshold: float = 0.5) -> bool:
@@ -273,6 +371,47 @@ class LearningEngine:
             return False
 
         return ctx_stats.revert_rate() > threshold
+
+    def should_skip_file_for_rule(self, rule_id: str, file_path: str) -> bool:
+        """
+        Check if a file should be skipped for a rule based on auto-skiplist.
+
+        Args:
+            rule_id: Rule identifier
+            file_path: File path to check
+
+        Returns:
+            True if file should be skipped for this rule
+        """
+        if rule_id not in self.data.auto_skiplist:
+            return False
+
+        # Check if file matches any skiplist pattern
+        for pattern in self.data.auto_skiplist[rule_id]:
+            if file_path == pattern:
+                return True
+
+        return False
+
+    def get_tuned_rules(self) -> list[tuple[str, float, RuleStats]]:
+        """
+        Get rules with non-default tuned thresholds.
+
+        Returns:
+            List of (rule_id, tuned_threshold, stats) tuples for rules with adjustments
+        """
+        tuned_rules = []
+
+        for rule_id, stats in self.data.rules.items():
+            if stats.sample_size() >= MIN_SAMPLE_SIZE:
+                threshold = self.tuned_threshold(rule_id)
+                if abs(threshold - DEFAULT_MIN_AUTO) > 0.001:  # Has adjustment
+                    tuned_rules.append((rule_id, threshold, stats))
+
+        # Sort by threshold (most conservative first)
+        tuned_rules.sort(key=lambda x: -x[1])
+
+        return tuned_rules
 
     def get_top_rules_by_revert_rate(self, limit: int = 10) -> list[tuple[str, RuleStats, float]]:
         """

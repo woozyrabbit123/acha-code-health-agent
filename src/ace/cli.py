@@ -573,6 +573,40 @@ def cmd_report(args):
         return ExitCode.OPERATIONAL_ERROR
 
 
+def cmd_report_health(args):
+    """Generate health map with risk heatmap (v1.7)."""
+    try:
+        from ace.report import generate_health_map
+
+        target = Path(args.target) if hasattr(args, "target") else Path(".")
+        if not target.exists():
+            raise OperationalError(f"Target path does not exist: {target}")
+
+        rules = args.rules.split(",") if hasattr(args, "rules") and args.rules else None
+        output_path = args.output if hasattr(args, "output") else ".ace/health.html"
+
+        print(f"Generating health map for {target}...")
+
+        # Run analysis
+        findings = run_analyze(target, rules)
+
+        # Generate health map with risk heatmap
+        report_path = generate_health_map(findings, output_path=output_path)
+
+        print(f"✓ Health map generated: {report_path}")
+        print(f"  Total findings: {len(findings)}")
+        print(f"  Open with: open {report_path}")
+
+        return ExitCode.SUCCESS
+
+    except ACEError as e:
+        print(format_error(e), file=sys.stderr)
+        return e.exit_code
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
 def cmd_policy(args):
     """Manage policy configuration."""
     try:
@@ -726,6 +760,74 @@ def cmd_tune(args):
         return ExitCode.OPERATIONAL_ERROR
 
 
+def cmd_telemetry(args):
+    """View performance telemetry (v1.7)."""
+    try:
+        from ace.telemetry import Telemetry
+
+        subcommand = args.telemetry_command if hasattr(args, "telemetry_command") else None
+
+        telemetry = Telemetry()
+
+        if subcommand == "summary":
+            # Show summary with p95
+            days = args.days if hasattr(args, "days") else 7
+            stats = telemetry.summary(days=days)
+
+            print(f"ACE Telemetry Summary (last {days} days)\n" + "=" * 60)
+
+            if stats.total_executions == 0:
+                print("\nNo telemetry data yet. Run analysis to collect telemetry.")
+                return ExitCode.SUCCESS
+
+            print(f"\n{'Total executions':<30}: {stats.total_executions}")
+            print(f"{'Unique rules':<30}: {len(stats.per_rule_count)}")
+
+            # Show top 10 slowest rules
+            top_slow = [
+                (rule_id, stats.per_rule_avg_ms[rule_id], stats.per_rule_p95_ms[rule_id], stats.per_rule_count[rule_id])
+                for rule_id in stats.per_rule_avg_ms
+            ]
+            top_slow.sort(key=lambda x: -x[2])  # Sort by p95 descending
+
+            if top_slow:
+                print(f"\nTop {min(10, len(top_slow))} slowest rules (by p95):\n")
+                print(f"{'Rule ID':<35} {'Mean (ms)':<12} {'P95 (ms)':<12} {'Count':<10}")
+                print("-" * 75)
+
+                for rule_id, mean_ms, p95_ms, count in top_slow[:10]:
+                    print(f"{rule_id:<35} {mean_ms:>10.2f} {p95_ms:>10.2f} {count:>9}")
+
+            return ExitCode.SUCCESS
+
+        else:
+            print("Usage: ace telemetry summary [--days N]")
+            return ExitCode.INVALID_ARGS
+
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
+def cmd_ui(args):
+    """Launch TUI dashboard (v1.7)."""
+    try:
+        from ace.tui.app import run_dashboard
+
+        print("Launching ACE TUI Dashboard...")
+        print("Press 'q' to quit, 'h' for help")
+        run_dashboard()
+
+        return ExitCode.SUCCESS
+
+    except ImportError:
+        print("TUI dashboard requires Textual. Install with: pip install textual", file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
 def cmd_repair(args):
     """Show repair report for partial edit failures."""
     try:
@@ -789,6 +891,21 @@ def cmd_learn(args):
 
             print(f"\n{'Total rules tracked':<30}: {len(learning.data.rules)}")
             print(f"{'Total contexts tracked':<30}: {len(learning.data.contexts)}")
+
+            # v1.7: Show tuned rules with non-default thresholds
+            tuned_rules = learning.get_tuned_rules()
+            if tuned_rules:
+                print(f"\n{'Rules with tuned thresholds':<30}:\n")
+                print(f"{'Rule ID':<35} {'Tuned Threshold':<18} {'Sample Size':<12}")
+                print("-" * 65)
+                for rule_id, threshold, stats in tuned_rules:
+                    print(f"{rule_id:<35} {threshold:>16.2f} {stats.sample_size():>11}")
+
+            # v1.7: Show auto-skiplist patterns
+            if learning.data.auto_skiplist:
+                print(f"\n{'Auto-skiplist patterns':<30}: {len(learning.data.auto_skiplist)}")
+                for rule_id, patterns in list(learning.data.auto_skiplist.items())[:5]:
+                    print(f"  {rule_id}: {len(patterns)} pattern(s)")
 
             return ExitCode.SUCCESS
 
@@ -1571,12 +1688,17 @@ def main():
         )
         parser_watch.set_defaults(func=cmd_watch)
 
-        # report subcommand
+        # report subcommands
         parser_report = subparsers.add_parser(
-            "report", help="Generate analysis report"
+            "report", help="Generate analysis reports"
         )
+        report_subparsers = parser_report.add_subparsers(
+            dest="report_command", help="Report commands"
+        )
+
+        # report (default - backwards compatible)
         parser_report.add_argument(
-            "--target", required=True, help="Target directory or file to analyze"
+            "--target", help="Target directory or file to analyze"
         )
         parser_report.add_argument(
             "--rules", help="Comma-separated list of rule IDs (default: all)"
@@ -1589,6 +1711,22 @@ def main():
             "--output", help="Output file path (default: stdout)"
         )
         parser_report.set_defaults(func=cmd_report)
+
+        # report health (v1.7)
+        parser_report_health = report_subparsers.add_parser(
+            "health", help="Generate health map with risk heatmap"
+        )
+        parser_report_health.add_argument(
+            "--target", default=".", help="Target directory to analyze (default: .)"
+        )
+        parser_report_health.add_argument(
+            "--rules", help="Comma-separated list of rule IDs (default: all)"
+        )
+        parser_report_health.add_argument(
+            "--output", default=".ace/health.html",
+            help="Output HTML file path (default: .ace/health.html)"
+        )
+        parser_report_health.set_defaults(func=cmd_report_health)
 
         # policy subcommands
         parser_policy = subparsers.add_parser(
@@ -1916,6 +2054,30 @@ def main():
             "install-pre-commit", help="Install ACE pre-commit hook"
         )
         parser_install_precommit.set_defaults(func=cmd_install_pre_commit)
+
+        # telemetry subcommands (v1.7)
+        parser_telemetry = subparsers.add_parser(
+            "telemetry", help="View performance telemetry"
+        )
+        telemetry_subparsers = parser_telemetry.add_subparsers(
+            dest="telemetry_command", help="Telemetry commands"
+        )
+
+        # telemetry summary
+        parser_telemetry_summary = telemetry_subparsers.add_parser(
+            "summary", help="Show telemetry summary with p95"
+        )
+        parser_telemetry_summary.add_argument(
+            "--days", type=int, default=7,
+            help="Number of days to aggregate (default: 7)"
+        )
+        parser_telemetry_summary.set_defaults(func=cmd_telemetry)
+
+        # ui subcommand (v1.7)
+        parser_ui = subparsers.add_parser(
+            "ui", help="Launch TUI dashboard"
+        )
+        parser_ui.set_defaults(func=cmd_ui)
 
         args = parser.parse_args()
 
