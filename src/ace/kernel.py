@@ -1,12 +1,14 @@
 """ACE Kernel - Orchestrates analysis, refactoring, and validation."""
 
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from ace import __version__
 from ace.errors import ExitCode
 from ace.fileio import read_text_file, write_text_preserving_style
 from ace.git_safety import check_git_safety, git_commit_changes, git_stash_changes
+from ace.perf import get_profiler
 from ace.receipts import Receipt, create_receipt
 from ace.safety import content_hash, is_idempotent
 from ace.skills.config import analyze_yaml_duplicate_keys
@@ -33,6 +35,7 @@ def run_analyze(
     use_cache: bool = True,
     cache_ttl: int = 3600,
     cache_dir: str = ".ace",
+    jobs: int = 1,
 ) -> list[UnifiedIssue]:
     """
     Run analysis on target path and collect findings.
@@ -43,11 +46,13 @@ def run_analyze(
         use_cache: Whether to use analysis cache (default: True)
         cache_ttl: Cache TTL in seconds (default: 3600)
         cache_dir: Cache directory (default: .ace)
+        jobs: Number of parallel workers (default: 1 for sequential)
 
     Returns:
-        List of UnifiedIssue findings
+        List of UnifiedIssue findings (sorted deterministically)
     """
-    all_findings = []
+    profiler = get_profiler()
+    profiler.start_phase("analyze")
 
     # Convert str to Path if needed
     if isinstance(target_path, str):
@@ -75,14 +80,9 @@ def run_analyze(
         """Check if rule should be run based on filter."""
         return should_run_rule_static(rule_id, rules_filter)
 
-    if target_path.is_file():
-        files = [target_path]
-    else:
-        # Collect all files (sorted for determinism)
-        files = sorted(target_path.rglob("*"))
-        files = [f for f in files if f.is_file()]
-
-    for file_path in files:
+    # Helper function to analyze a single file
+    def analyze_file(file_path: Path, file_index: int) -> tuple[int, list[UnifiedIssue]]:
+        """Analyze a single file and return (index, findings) for deterministic sorting."""
         try:
             # Use robust file I/O with encoding/newline handling
             content, _ = read_text_file(file_path, preserve_newlines=False)
@@ -96,9 +96,8 @@ def run_analyze(
                 cached_findings = cache.get(path_str, file_hash, ruleset_hash)
                 if cached_findings is not None:
                     # Cache hit: restore UnifiedIssue objects from dicts
-                    for finding_dict in cached_findings:
-                        all_findings.append(_dict_to_uir(finding_dict))
-                    continue
+                    findings = [_dict_to_uir(finding_dict) for finding_dict in cached_findings]
+                    return (file_index, findings)
 
             # Cache miss: perform analysis
             # Parse suppressions for this file
@@ -147,15 +146,52 @@ def run_analyze(
                     [f.to_dict() for f in file_findings],
                 )
 
-            all_findings.extend(file_findings)
+            return (file_index, file_findings)
 
         except Exception:
             # Skip files that can't be read or analyzed
-            pass
+            return (file_index, [])
 
-    # Sort findings for determinism
+    # Collect files to analyze
+    if target_path.is_file():
+        files = [target_path]
+    else:
+        # Collect all files (sorted for determinism)
+        files = sorted(target_path.rglob("*"))
+        files = [f for f in files if f.is_file()]
+
+    # Analyze files (parallel or sequential)
+    indexed_results: list[tuple[int, list[UnifiedIssue]]] = []
+
+    if jobs > 1:
+        # Parallel execution with ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=jobs) as executor:
+            futures = {
+                executor.submit(analyze_file, file_path, idx): idx
+                for idx, file_path in enumerate(files)
+            }
+
+            for future in as_completed(futures):
+                file_index, findings = future.result()
+                if findings:
+                    indexed_results.append((file_index, findings))
+    else:
+        # Sequential execution
+        for idx, file_path in enumerate(files):
+            file_index, findings = analyze_file(file_path, idx)
+            if findings:
+                indexed_results.append((file_index, findings))
+
+    # Sort by original file index for determinism, then extract findings
+    indexed_results.sort(key=lambda x: x[0])
+    all_findings = []
+    for _, findings in indexed_results:
+        all_findings.extend(findings)
+
+    # Final sort by (file, line, rule) for complete determinism
     all_findings.sort(key=lambda f: (f.file, f.line, f.rule))
 
+    profiler.stop_phase("analyze")
     return all_findings
 
 
