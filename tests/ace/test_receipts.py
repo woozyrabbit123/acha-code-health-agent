@@ -4,8 +4,6 @@ import json
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from ace.export import validate_against_schema
 from ace.kernel import run_apply
 from ace.receipts import (

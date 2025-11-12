@@ -1,11 +1,10 @@
 """Tests for JSON Schema validation of UIR data structures."""
 
 import json
-import pytest
 
 from ace.export import load_schema, validate_against_schema
-from ace.uir import UnifiedIssue, Severity, create_uir
 from ace.skills.python import Edit, EditPlan
+from ace.uir import create_uir
 
 
 class TestSchemaLoading:

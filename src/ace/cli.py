@@ -10,12 +10,12 @@ from ace import __version__
 from ace.errors import (
     ACEError,
     ExitCode,
-    InvalidArgsError,
     OperationalError,
     PolicyDenyError,
     format_error,
 )
 from ace.kernel import run_analyze, run_apply, run_refactor, run_validate
+from ace.storage import compare_baseline, save_baseline
 
 
 def cmd_analyze(args):
@@ -28,7 +28,18 @@ def cmd_analyze(args):
 
         rules = args.rules.split(",") if args.rules else None
 
-        findings = run_analyze(target, rules)
+        # Cache parameters
+        use_cache = not args.no_cache
+        cache_ttl = args.cache_ttl if hasattr(args, "cache_ttl") else 3600
+        cache_dir = args.cache_dir if hasattr(args, "cache_dir") else ".ace"
+
+        findings = run_analyze(
+            target,
+            rules,
+            use_cache=use_cache,
+            cache_ttl=cache_ttl,
+            cache_dir=cache_dir,
+        )
 
         # Output as JSON
         output = [f.to_dict() for f in findings]
@@ -109,6 +120,88 @@ def cmd_export(args):
         return ExitCode.OPERATIONAL_ERROR
 
 
+def cmd_baseline_create(args):
+    """Create a baseline snapshot of current findings."""
+    try:
+        target = Path(args.target)
+
+        if not target.exists():
+            raise OperationalError(f"Target path does not exist: {target}")
+
+        rules = args.rules.split(",") if args.rules else None
+        baseline_path = args.baseline_path
+
+        # Run analysis (with cache disabled for baseline creation)
+        findings = run_analyze(target, rules, use_cache=False)
+
+        # Convert to dicts and save
+        findings_dicts = [f.to_dict() for f in findings]
+        save_baseline(findings_dicts, baseline_path)
+
+        print(f"Baseline created with {len(findings)} findings → {baseline_path}")
+        return ExitCode.SUCCESS
+
+    except ACEError as e:
+        print(format_error(e), file=sys.stderr)
+        return e.exit_code
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
+def cmd_baseline_compare(args):
+    """Compare current findings against baseline."""
+    try:
+        target = Path(args.target)
+
+        if not target.exists():
+            raise OperationalError(f"Target path does not exist: {target}")
+
+        rules = args.rules.split(",") if args.rules else None
+        baseline_path = args.baseline_path
+
+        if not Path(baseline_path).exists():
+            raise OperationalError(f"Baseline file does not exist: {baseline_path}")
+
+        # Run analysis
+        findings = run_analyze(target, rules, use_cache=True)
+
+        # Convert to dicts and compare
+        findings_dicts = [f.to_dict() for f in findings]
+        comparison = compare_baseline(findings_dicts, baseline_path)
+
+        # Print summary
+        added_count = len(comparison["added"])
+        removed_count = len(comparison["removed"])
+        changed_count = len(comparison["changed"])
+        existing_count = len(comparison["existing"])
+
+        print(json.dumps(comparison, indent=2, sort_keys=True))
+        print("\n--- Baseline Comparison ---", file=sys.stderr)
+        print(f"Added:    {added_count}", file=sys.stderr)
+        print(f"Removed:  {removed_count}", file=sys.stderr)
+        print(f"Changed:  {changed_count}", file=sys.stderr)
+        print(f"Existing: {existing_count}", file=sys.stderr)
+
+        # Exit code based on policy flags
+        if args.fail_on_new and added_count > 0:
+            print(f"\nFAIL: {added_count} new findings detected", file=sys.stderr)
+            return ExitCode.POLICY_DENY
+
+        if args.fail_on_regression and (added_count > 0 or changed_count > 0):
+            print(f"\nFAIL: Regression detected ({added_count} new, {changed_count} changed)", file=sys.stderr)
+            return ExitCode.POLICY_DENY
+
+        return ExitCode.SUCCESS
+
+    except ACEError as e:
+        print(format_error(e), file=sys.stderr)
+        return e.exit_code
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
 def cmd_apply(args):
     """Apply refactoring changes with safety checks."""
     try:
@@ -162,7 +255,7 @@ def main():
     """Main CLI entry point."""
     try:
         parser = argparse.ArgumentParser(
-            prog="ace", description="ACE - Autonomous Code Editor v0.1"
+            prog="ace", description="ACE - Autonomous Code Editor v0.2"
         )
 
         parser.add_argument(
@@ -170,6 +263,9 @@ def main():
         )
         parser.add_argument(
             "--verbose", action="store_true", help="Enable verbose error output"
+        )
+        parser.add_argument(
+            "--config", help="Path to ace.toml configuration file"
         )
 
         subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -183,6 +279,15 @@ def main():
         )
         parser_analyze.add_argument(
             "--rules", help="Comma-separated list of rule IDs to run (default: all)"
+        )
+        parser_analyze.add_argument(
+            "--no-cache", action="store_true", help="Disable analysis cache"
+        )
+        parser_analyze.add_argument(
+            "--cache-ttl", type=int, default=3600, help="Cache TTL in seconds (default: 3600)"
+        )
+        parser_analyze.add_argument(
+            "--cache-dir", default=".ace", help="Cache directory (default: .ace)"
         )
         parser_analyze.set_defaults(func=cmd_analyze)
 
@@ -239,6 +344,54 @@ def main():
             "--commit", action="store_true", help="Commit changes after applying"
         )
         parser_apply.set_defaults(func=cmd_apply)
+
+        # baseline subcommands
+        parser_baseline = subparsers.add_parser(
+            "baseline", help="Baseline management"
+        )
+        baseline_subparsers = parser_baseline.add_subparsers(
+            dest="baseline_command", help="Baseline commands"
+        )
+
+        # baseline create
+        parser_baseline_create = baseline_subparsers.add_parser(
+            "create", help="Create baseline snapshot"
+        )
+        parser_baseline_create.add_argument(
+            "--target", required=True, help="Target directory or file to baseline"
+        )
+        parser_baseline_create.add_argument(
+            "--rules", help="Comma-separated list of rule IDs (default: all)"
+        )
+        parser_baseline_create.add_argument(
+            "--baseline-path", default=".ace/baseline.json",
+            help="Baseline file path (default: .ace/baseline.json)"
+        )
+        parser_baseline_create.set_defaults(func=cmd_baseline_create)
+
+        # baseline compare
+        parser_baseline_compare = baseline_subparsers.add_parser(
+            "compare", help="Compare against baseline"
+        )
+        parser_baseline_compare.add_argument(
+            "--target", required=True, help="Target directory or file to compare"
+        )
+        parser_baseline_compare.add_argument(
+            "--rules", help="Comma-separated list of rule IDs (default: all)"
+        )
+        parser_baseline_compare.add_argument(
+            "--baseline-path", default=".ace/baseline.json",
+            help="Baseline file path (default: .ace/baseline.json)"
+        )
+        parser_baseline_compare.add_argument(
+            "--fail-on-new", action="store_true",
+            help="Exit with error if new findings are detected"
+        )
+        parser_baseline_compare.add_argument(
+            "--fail-on-regression", action="store_true",
+            help="Exit with error if any regression (new or changed) is detected"
+        )
+        parser_baseline_compare.set_defaults(func=cmd_baseline_compare)
 
         args = parser.parse_args()
 

@@ -3,8 +3,6 @@
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from ace.fileio import (
     detect_newline_style,
     normalize_newlines,
@@ -241,7 +239,7 @@ class TestEncodingHandling:
     def test_read_write_round_trip_utf8(self):
         """Test round-trip preserves UTF-8 content."""
         with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".txt") as f:
-            f.write("Hello 世界\nПривет мир\n".encode("utf-8"))
+            f.write("Hello 世界\nПривет мир\n".encode())
             temp_path = f.name
 
         try:
