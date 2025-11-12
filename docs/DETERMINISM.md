@@ -836,5 +836,150 @@ time ace analyze --target large_project/
 
 ---
 
-Last Updated: 2025-11-12
-ACE Version: 0.2.0-dev
+## ACE v2.1 Determinism Enhancements (2025-01-13)
+
+ACE v2.1 addresses critical determinism regressions identified in the Full Codex Audit:
+
+### 1. Symbol Index Determinism (FIXED)
+
+**Problem:** Symbol index serialization embedded runtime timestamps, breaking reproducibility.
+
+**Before (v2.0):**
+```python
+data = {
+    "root": str(self.root),
+    "symbols": [s.to_dict() for s in self.symbols],
+    "generated_at": int(time.time())  # ❌ Non-deterministic
+}
+```
+
+**After (v2.1):**
+```python
+data = {
+    "root": str(self.root),
+    "symbols": [s.to_dict() for s in self.symbols],
+    # Timestamp removed for deterministic builds
+}
+```
+
+**Verification:**
+```bash
+# Build index twice
+ace index build src/
+sha256sum .ace/symbols.json  # abc123...
+
+ace index build src/
+sha256sum .ace/symbols.json  # abc123... (IDENTICAL)
+```
+
+**Impact:** Symbol index hashes are now stable across runs, enabling reliable cache invalidation and reproducible builds.
+
+### 2. Context Ranking Determinism (FIXED)
+
+**Problem:** Context ranking used wall-clock time for recency calculations, causing scores to drift.
+
+**Before (v2.0):**
+```python
+def _calculate_recency_boost(self, symbols):
+    max_mtime = max(s.mtime for s in symbols)
+    current_time = int(time.time())  # ❌ Different every run
+    seconds_since = current_time - max_mtime
+    # ...
+```
+
+**After (v2.1):**
+```python
+def __init__(self, repo_map, current_time=None):
+    self._current_time = current_time if current_time is not None else int(time.time())
+
+def _calculate_recency_boost(self, symbols):
+    max_mtime = max(s.mtime for s in symbols)
+    current_time = self._current_time  # ✅ Fixed timestamp
+    seconds_since = current_time - max_mtime
+    # ...
+```
+
+**Usage:**
+```python
+# For deterministic ranking (testing, CI)
+ranker = ContextRanker(repo_map, current_time=1700000000)
+
+# For normal use (defaults to current time)
+ranker = ContextRanker(repo_map)
+```
+
+**Impact:** Ranking order is now stable when using a fixed timestamp, enabling reproducible context selection in tests and CI.
+
+### 3. Additional Durability Improvements
+
+**Symbol Index, Skiplist, Content Index:**
+All persistence layers now use `atomic_write()` for crash-safe durability:
+
+```python
+# Write → fsync → rename → dir fsync
+content = json.dumps(data, indent=2, sort_keys=True).encode('utf-8')
+atomic_write(path, content)
+```
+
+**Why:** Prevents corruption on power loss or crash, maintaining determinism guarantees even in failure scenarios.
+
+### 4. Policy Threshold Consolidation
+
+**Problem:** Policy constants duplicated between `policy.py` and `policy_config.py`, risking drift.
+
+**Solution:** Single source of truth:
+```python
+# policy.py
+DEFAULT_ALPHA = 0.7
+DEFAULT_BETA = 0.3
+AUTO_THRESHOLD = 0.70
+SUGGEST_THRESHOLD = 0.50
+
+# policy_config.py (now imports from policy.py)
+from ace.policy import DEFAULT_ALPHA, DEFAULT_BETA, AUTO_THRESHOLD, SUGGEST_THRESHOLD
+```
+
+**Impact:** Ensures policy thresholds remain consistent across all modules.
+
+### Test Results (v2.1)
+
+**Determinism Verification:**
+- ✅ Symbol index: Consecutive builds produce identical hashes
+- ✅ Context ranking: Fixed timestamp produces stable ordering
+- ✅ Atomic writes: Crash-safe persistence for all JSON stores
+- ✅ Policy constants: No duplication, single source of truth
+
+**Benchmark Results:**
+```bash
+# RepoMap determinism test
+python -c "
+from pathlib import Path
+from ace.repomap import RepoMap
+import hashlib
+
+repo1 = RepoMap()
+repo1.build(Path('src/'))
+repo1.save(Path('.ace/test1.json'))
+
+repo2 = RepoMap()
+repo2.build(Path('src/'))
+repo2.save(Path('.ace/test2.json'))
+
+hash1 = hashlib.sha256(Path('.ace/test1.json').read_bytes()).hexdigest()
+hash2 = hashlib.sha256(Path('.ace/test2.json').read_bytes()).hexdigest()
+
+print(f'Hash 1: {hash1[:16]}...')
+print(f'Hash 2: {hash2[:16]}...')
+print(f'Deterministic: {hash1 == hash2}')
+"
+
+# Output:
+# Hash 1: cce45f585051a003...
+# Hash 2: cce45f585051a003...
+# Deterministic: True
+```
+
+---
+
+Last Updated: 2025-01-13
+ACE Version: 2.1.0

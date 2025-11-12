@@ -51,8 +51,8 @@
 Get started in 30 seconds:
 
 ```bash
-# Install ACE
-pip install acha-code-health[ace]
+# Install ACHA (includes ACE command-line tool)
+pip install acha-code-health
 
 # Run analysis on your project
 ace analyze --target ./sample_project
@@ -247,12 +247,15 @@ See [DETERMINISM.md](docs/DETERMINISM.md) for technical details and testing meth
 git clone https://github.com/woozyrabbit123/acha-code-health-agent.git
 cd acha-code-health-agent
 
-# Create virtual environment
+# Create virtual environment (requires Python 3.11 or 3.12)
 python3.11 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Install development dependencies
+# Install development dependencies (includes all core deps + dev tools)
 pip install -e ".[dev,test,pro]"
+
+# Alternative: Install from requirements-dev.txt for pinned versions
+pip install -r requirements-dev.txt && pip install -e .
 ```
 
 ### Running Tests

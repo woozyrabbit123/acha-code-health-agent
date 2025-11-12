@@ -47,10 +47,33 @@ Planner (prioritize) → Apply (with guards) →
 Repair (if needed) → Learning (record outcome)
 ```
 
-### Safety Mechanisms
+### Safety Mechanisms (PatchGuard)
 
-- **Parse Guards**: Ensure syntax validity after edits
-- **AST Hash Guards**: Detect semantic changes
+ACE implements multi-layer verification in `ace.guard` to prevent semantic tampering and ensure safe code transformations:
+
+**Layer 1: Parse Verification**
+- Ensures syntax validity after edits
+- Catches basic syntax errors before application
+
+**Layer 2: AST Equivalence** (strict mode)
+- Verifies structural equivalence between before/after code
+- Ensures refactoring preserves program semantics
+
+**Layer 2.5: Symbol Count Verification**
+- Counts functions, classes, and imports in before/after code
+- Detects unintended additions or removals of code entities
+
+**Layer 2.6: AST Hash Verification** (v2.1+)
+- Computes cryptographic hash of AST structure
+- **In strict mode:** Fails on hash mismatch to detect semantic tampering
+- **In non-strict mode:** Logs mismatches for telemetry
+- Prevents bypass of equivalence checks via CST-only transforms
+
+**Layer 3: CST Roundtrip**
+- Verifies LibCST can parse and regenerate the code
+- Ensures formatting/whitespace changes are safe
+
+**Additional Guards:**
 - **Import Preservation**: Verify critical imports remain
 - **Binary Search Repair**: Isolate failing edits automatically
 - **Journal Revert**: Full undo capability for all changes
@@ -139,7 +162,12 @@ pack = CodemodPack(
 - **v1.6**: Codemod packs and pre-commit integration
 - **v1.7**: Learning v2, Telemetry v2, TUI Dashboard
 - **v2.0**: Planner v1, Optional LLM Assist, Local CI
-- **v2.1**: Codex fixes, polish, and audit prep (current)
+- **v2.1**: Full Codex Audit fixes (current)
+  - **P0 Fixes**: Moved mandatory deps to core, removed non-deterministic timestamps, enforced PatchGuard AST hash verification
+  - **P1 Fixes**: Deterministic context ranking, hardened subprocess execution, aligned CI matrix, atomic writes for all persistence
+  - **Security**: AST hash mismatches now fail in strict mode (previously informational-only)
+  - **Determinism**: Symbol index and context ranking now fully reproducible
+  - **Durability**: All JSON persistence uses atomic write (fsync + rename)
 
 ## Development Workflow
 
