@@ -1,7 +1,12 @@
 """ACE Kernel - Orchestrates analysis, refactoring, and validation."""
 
+import time
 from pathlib import Path
 
+from ace.errors import ExitCode
+from ace.fileio import read_text_file, write_text_preserving_style
+from ace.git_safety import check_git_safety, git_commit_changes, git_stash_changes
+from ace.receipts import Receipt, create_receipt
 from ace.safety import content_hash, is_idempotent
 from ace.skills.config import analyze_yaml_duplicate_keys
 from ace.skills.markdown import analyze_markdown_dangerous_commands
@@ -54,7 +59,8 @@ def run_analyze(target_path: Path | str, rules: list[str] | None = None) -> list
 
     for file_path in files:
         try:
-            content = file_path.read_text(encoding="utf-8")
+            # Use robust file I/O with encoding/newline handling
+            content, _ = read_text_file(file_path, preserve_newlines=False)
             path_str = str(file_path)
 
             # Python rules
@@ -128,7 +134,8 @@ def run_refactor(
             if not file_path.exists():
                 continue
 
-            content = file_path.read_text(encoding="utf-8")
+            # Use robust file I/O with encoding/newline handling
+            content, _ = read_text_file(file_path, preserve_newlines=False)
 
             # Apply appropriate refactoring based on rule
             if rule_id == "PY-S101-UNSAFE-HTTP":
@@ -190,8 +197,9 @@ def run_validate(target_path: Path, rules: list[str] | None = None) -> list[dict
             else:
                 parse_valid = True
 
-            # Calculate content hashes
-            before_hash = content_hash(file_path.read_text(encoding="utf-8"))
+            # Calculate content hashes using robust file I/O
+            before_content, _ = read_text_file(file_path, preserve_newlines=False)
+            before_hash = content_hash(before_content)
             after_hash = content_hash(edit.payload)
 
             receipt = {
@@ -212,22 +220,46 @@ def run_validate(target_path: Path, rules: list[str] | None = None) -> list[dict
     return receipts
 
 
-def run_apply(target_path: Path, rules: list[str] | None = None, dry_run: bool = False) -> int:
+def run_apply(
+    target_path: Path,
+    rules: list[str] | None = None,
+    dry_run: bool = False,
+    force: bool = False,
+    stash: bool = False,
+    commit: bool = False,
+) -> tuple[int, list[Receipt]]:
     """
-    Apply refactoring plans to files.
+    Apply refactoring plans to files with git safety checks.
 
     Args:
         target_path: Directory or file to apply changes to
         rules: Optional list of rule IDs to apply
         dry_run: If True, don't actually write files
+        force: If True, skip git safety checks
+        stash: If True, stash changes before applying
+        commit: If True, commit changes after applying
 
     Returns:
-        Exit code (0 for success)
+        Tuple of (exit_code, receipts)
     """
+    # Git safety checks
+    try:
+        check_git_safety(target_path, force=force, allow_dirty=False)
+    except Exception:
+        # If safety check fails, return policy deny
+        return (ExitCode.POLICY_DENY, [])
+
+    # Stash if requested
+    if stash and not dry_run:
+        git_stash_changes(target_path, message="ACE: stash before refactoring")
+
     plans = run_refactor(target_path, rules)
 
     if not plans:
-        return 0
+        return (ExitCode.SUCCESS, [])
+
+    modified_files = []
+    receipts = []
 
     for plan in plans:
         if not plan.edits:
@@ -240,9 +272,16 @@ def run_apply(target_path: Path, rules: list[str] | None = None, dry_run: bool =
             continue
 
         try:
+            # Start timing
+            start_time = time.perf_counter()
+
+            # Read file preserving original newline style for round-trip
+            original_content, original_newline_style = read_text_file(
+                file_path, preserve_newlines=True
+            )
+
             # Verify idempotency for Python files
             if file_path.suffix == ".py":
-                original_content = file_path.read_text(encoding="utf-8")
 
                 # Create transform function for idempotency check
                 def transform(
@@ -261,19 +300,49 @@ def run_apply(target_path: Path, rules: list[str] | None = None, dry_run: bool =
                     return content
 
                 # Check idempotency
-                if not is_idempotent(transform, original_content):
-                    # Not idempotent, but we can still apply once
-                    pass
+                idempotent = is_idempotent(transform, original_content)
+            else:
+                idempotent = True
 
-            # Write the changes
+            # Validate syntax if applicable
+            if file_path.suffix == ".py":
+                parse_valid = validate_python_syntax(edit.payload)
+            else:
+                parse_valid = True
+
+            # Write the changes preserving original newline style
             if not dry_run:
-                file_path.write_text(edit.payload, encoding="utf-8")
+                write_text_preserving_style(file_path, edit.payload, original_newline_style)
+                modified_files.append(str(file_path))
+
+            # Calculate duration
+            end_time = time.perf_counter()
+            duration_ms = int((end_time - start_time) * 1000)
+
+            # Create receipt
+            receipt = create_receipt(
+                plan_id=plan.id,
+                file_path=str(file_path),
+                before_content=original_content,
+                after_content=edit.payload,
+                parse_valid=parse_valid,
+                invariants_met=parse_valid and idempotent,
+                estimated_risk=plan.estimated_risk,
+                duration_ms=duration_ms,
+            )
+            receipts.append(receipt)
 
         except Exception:
             # Skip files that can't be written
-            return 1
+            return (ExitCode.OPERATIONAL_ERROR, receipts)
 
-    return 0
+    # Commit if requested and files were modified
+    if commit and not dry_run and modified_files:
+        rule_desc = f" ({', '.join(rules)})" if rules else ""
+        commit_msg = f"refactor: apply ACE refactorings{rule_desc}"
+        git_commit_changes(target_path, commit_msg, modified_files)
+
+    return (ExitCode.SUCCESS, receipts)
 
 
 # ============================================================================
