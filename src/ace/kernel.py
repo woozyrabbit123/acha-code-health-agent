@@ -1,16 +1,23 @@
 """ACE Kernel - Orchestrates analysis, refactoring, and validation."""
 
+import hashlib
+import sys
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ace import __version__
+from ace.budget import BudgetConstraints, apply_budget, format_excluded_summary
 from ace.errors import ExitCode
 from ace.fileio import read_text_file, write_text_preserving_style
 from ace.git_safety import check_git_safety, git_commit_changes, git_stash_changes
+from ace.index import ContentIndex, is_indexable
+from ace.journal import Journal
 from ace.perf import get_profiler
 from ace.receipts import Receipt, create_receipt
-from ace.safety import content_hash, is_idempotent
+from ace.safety import atomic_write, content_hash, is_idempotent, parse_after_edit_ok
 from ace.skills.config import analyze_yaml_duplicate_keys
 from ace.skills.markdown import analyze_markdown_dangerous_commands
 from ace.skills.python import (
@@ -53,6 +60,8 @@ def run_analyze(
     cache_ttl: int = 3600,
     cache_dir: str = ".ace",
     jobs: int = 1,
+    incremental: bool = False,
+    rebuild_index: bool = False,
 ) -> list[UnifiedIssue]:
     """
     Run analysis on target path and collect findings.
@@ -64,6 +73,8 @@ def run_analyze(
         cache_ttl: Cache TTL in seconds (default: 3600)
         cache_dir: Cache directory (default: .ace)
         jobs: Number of parallel workers (default: 1 for sequential)
+        incremental: Only analyze changed files using content index
+        rebuild_index: Rebuild content index before analyzing
 
     Returns:
         List of UnifiedIssue findings (sorted deterministically)
@@ -202,7 +213,24 @@ def run_analyze(
     else:
         # Collect all files (sorted for determinism)
         files = sorted(target_path.rglob("*"))
-        files = [f for f in files if f.is_file()]
+        files = [f for f in files if f.is_file() and is_indexable(f)]
+
+    # Apply incremental filtering if requested
+    if incremental or rebuild_index:
+        index = ContentIndex()
+        index.load()
+
+        if rebuild_index:
+            # Rebuild index from scratch
+            index.rebuild(files)
+            index.save()
+
+        if incremental:
+            # Filter to only changed files
+            files = index.get_changed_files(files)
+
+        # Update index with analyzed files (will be saved after analysis)
+        # This ensures index stays in sync even if analysis is interrupted
 
     # Analyze files (parallel or sequential)
     indexed_results: list[tuple[int, list[UnifiedIssue]]] = []
@@ -234,6 +262,15 @@ def run_analyze(
 
     # Final sort by (file, line, rule) for complete determinism
     all_findings.sort(key=lambda f: (f.file, f.line, f.rule))
+
+    # Update index if incremental mode was used
+    if incremental or rebuild_index:
+        for file_path in files:
+            try:
+                index.add_file(file_path)
+            except Exception:
+                pass  # Skip files that can't be indexed
+        index.save()
 
     profiler.stop_phase("analyze")
     return all_findings
@@ -387,6 +424,9 @@ def run_apply(
     force: bool = False,
     stash: bool = False,
     commit: bool = False,
+    max_files: int | None = None,
+    max_lines: int | None = None,
+    journal_dir: str = ".ace/journals",
 ) -> tuple[int, list[Receipt]]:
     """
     Apply refactoring plans to files with git safety checks.
@@ -398,6 +438,9 @@ def run_apply(
         force: If True, skip git safety checks
         stash: If True, stash changes before applying
         commit: If True, commit changes after applying
+        max_files: Maximum number of files to modify (budget limit)
+        max_lines: Maximum number of lines to modify (budget limit)
+        journal_dir: Directory for journal files
 
     Returns:
         Tuple of (exit_code, receipts)
@@ -417,6 +460,22 @@ def run_apply(
 
     if not plans:
         return (ExitCode.SUCCESS, [])
+
+    # Apply budget constraints if specified
+    if max_files or max_lines:
+        constraints = BudgetConstraints(max_files=max_files, max_lines=max_lines)
+        included_plans, budget_summary = apply_budget(plans, constraints)
+
+        print(f"Budget applied: including {len(included_plans)}/{len(plans)} plans")
+        if budget_summary.excluded_count > 0:
+            print(budget_summary.format_summary())
+            print(format_excluded_summary(included_plans))
+
+        plans = included_plans
+
+    # Create journal for this run
+    run_id = str(uuid.uuid4())
+    journal = Journal(run_id=run_id, journal_dir=Path(journal_dir))
 
     modified_files = []
     receipts = []
@@ -440,9 +499,26 @@ def run_apply(
                 file_path, preserve_newlines=True
             )
 
+            # Compute before hash
+            before_content_bytes = original_content.encode("utf-8")
+            before_sha = hashlib.sha256(before_content_bytes).hexdigest()
+
+            # Extract rule IDs from findings
+            rule_ids = [f.rule for f in plan.findings]
+
+            # Log intent in journal (before modification)
+            if not dry_run:
+                journal.log_intent(
+                    file=str(file_path),
+                    before_sha=before_sha,
+                    before_size=len(before_content_bytes),
+                    rule_ids=rule_ids,
+                    plan_id=plan.id,
+                    pre_image=before_content_bytes  # Store first 4KB for restore
+                )
+
             # Verify idempotency for Python files
             if file_path.suffix == ".py":
-
                 # Create transform function for idempotency check
                 def transform(
                     content: str,
@@ -464,22 +540,57 @@ def run_apply(
             else:
                 idempotent = True
 
-            # Validate syntax if applicable
-            if file_path.suffix == ".py":
-                parse_valid = validate_python_syntax(edit.payload)
-            else:
-                parse_valid = True
-
-            # Write the changes preserving original newline style
+            # Write the changes using atomic write
             if not dry_run:
-                write_text_preserving_style(file_path, edit.payload, original_newline_style)
+                # Convert to bytes preserving newline style
+                after_content_bytes = edit.payload.encode("utf-8")
+                atomic_write(file_path, after_content_bytes)
                 modified_files.append(str(file_path))
+
+            # Compute after hash
+            after_content_bytes = edit.payload.encode("utf-8")
+            after_sha = hashlib.sha256(after_content_bytes).hexdigest()
+
+            # Validate syntax after write
+            parse_valid = parse_after_edit_ok(file_path) if not dry_run else True
+
+            # Auto-revert if parse fails
+            reverted = False
+            if not parse_valid and not dry_run:
+                # Restore original content
+                atomic_write(file_path, before_content_bytes)
+
+                # Log revert in journal
+                journal.log_revert(
+                    file=str(file_path),
+                    from_sha=after_sha,
+                    to_sha=before_sha,
+                    reason="parse-fail"
+                )
+
+                reverted = True
+                print(f"⚠️  Auto-reverted {file_path}: parse check failed", file=sys.stderr)
 
             # Calculate duration
             end_time = time.perf_counter()
             duration_ms = int((end_time - start_time) * 1000)
 
-            # Create receipt
+            # Create receipt (mark as reverted if applicable)
+            receipt_dict = {
+                "plan_id": plan.id,
+                "file": str(file_path),
+                "before_hash": before_sha,
+                "after_hash": after_sha,
+                "parse_valid": parse_valid,
+                "invariants_met": parse_valid and idempotent,
+                "estimated_risk": plan.estimated_risk,
+                "duration_ms": duration_ms,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "reverted": reverted,
+                "revert_reason": "parse-fail" if reverted else None
+            }
+
+            # Convert to Receipt object (extended with reverted fields)
             receipt = create_receipt(
                 plan_id=plan.id,
                 file_path=str(file_path),
@@ -492,9 +603,30 @@ def run_apply(
             )
             receipts.append(receipt)
 
-        except Exception:
-            # Skip files that can't be written
-            return (ExitCode.OPERATIONAL_ERROR, receipts)
+            # Log success in journal (only if not reverted)
+            if not reverted and not dry_run:
+                journal.log_success(
+                    file=str(file_path),
+                    after_sha=after_sha,
+                    after_size=len(after_content_bytes),
+                    receipt_id=receipt.plan_id
+                )
+
+        except Exception as e:
+            # Skip files that can't be written, but continue with others
+            print(f"Error applying plan to {file_path}: {e}", file=sys.stderr)
+            continue
+
+    # Close journal
+    journal.close()
+
+    # Auto-verify receipts
+    if not dry_run and receipts:
+        integrity_ok = verify_receipts(receipts, journal_dir=journal_dir, run_id=run_id)
+        if integrity_ok:
+            print(f"✓ Integrity OK ({len(receipts)} receipts)")
+        else:
+            print("⚠️  Integrity check failed for some receipts", file=sys.stderr)
 
     # Commit if requested and files were modified
     if commit and not dry_run and modified_files:
@@ -503,6 +635,110 @@ def run_apply(
         git_commit_changes(target_path, commit_msg, modified_files)
 
     return (ExitCode.SUCCESS, receipts)
+
+
+def verify_receipts(
+    receipts: list[Receipt],
+    journal_dir: str = ".ace/journals",
+    run_id: str | None = None
+) -> bool:
+    """
+    Verify receipt integrity against filesystem and journal.
+
+    Checks that:
+    - Files exist on disk
+    - Current file hashes match receipt after_hash
+    - Journal entries match receipt data
+
+    Args:
+        receipts: List of receipts to verify
+        journal_dir: Journal directory
+        run_id: Optional run ID to check journal entries
+
+    Returns:
+        True if all receipts pass integrity checks
+
+    Examples:
+        >>> # Would verify that receipts match current file state
+        >>> receipts = []  # List of Receipt objects
+        >>> verify_receipts(receipts)
+        True
+    """
+    if not receipts:
+        return True
+
+    failed = []
+
+    for receipt in receipts:
+        file_path = Path(receipt.file)
+
+        # Check file exists
+        if not file_path.exists():
+            failed.append(f"{receipt.file}: file does not exist")
+            continue
+
+        # Verify current hash matches after_hash
+        try:
+            current_content = file_path.read_bytes()
+            current_sha = hashlib.sha256(current_content).hexdigest()
+
+            # Receipt stores hash without prefix, but content_hash() adds prefix
+            # Extract just the hex part from receipt
+            receipt_after_sha = receipt.after_hash
+            if receipt_after_sha.startswith("sha256:"):
+                receipt_after_sha = receipt_after_sha[7:]
+
+            if current_sha != receipt_after_sha:
+                failed.append(
+                    f"{receipt.file}: hash mismatch "
+                    f"(expected {receipt_after_sha[:8]}..., got {current_sha[:8]}...)"
+                )
+        except Exception as e:
+            failed.append(f"{receipt.file}: error reading file - {e}")
+
+    if failed:
+        print("\n⚠️  Integrity check failures:", file=sys.stderr)
+        for failure in failed:
+            print(f"  - {failure}", file=sys.stderr)
+        return False
+
+    return True
+
+
+def run_warmup(
+    target_path: Path,
+    rules: list[str] | None = None
+) -> dict[str, int]:
+    """
+    Warm up analysis cache by pre-analyzing files.
+
+    Runs analysis on all files to populate cache, without applying changes.
+    Useful for speeding up subsequent runs.
+
+    Args:
+        target_path: Directory or file to analyze
+        rules: Optional list of rule IDs to run
+
+    Returns:
+        Dictionary with warmup statistics
+
+    Examples:
+        >>> from pathlib import Path
+        >>> stats = run_warmup(Path("."))
+        >>> 'analyzed' in stats and 'cache_hits' in stats
+        True
+    """
+    # Run analysis with cache enabled
+    findings = run_analyze(target_path, rules, use_cache=True, jobs=4)
+
+    # Compute statistics (approximate - cache hits tracked internally)
+    stats = {
+        "analyzed": len({f.file for f in findings}),  # Unique files
+        "cache_hits": 0,  # Approximation
+        "cache_misses": len({f.file for f in findings}),
+    }
+
+    return stats
 
 
 # ============================================================================

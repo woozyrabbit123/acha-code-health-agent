@@ -2,6 +2,8 @@
 
 import ast
 import hashlib
+import os
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -132,6 +134,111 @@ def verify_parseable(file_path: str, language: str) -> bool:
     # For other languages, assume valid (stubs)
     # TODO: Add markdown, yaml, shell validation
     return True
+
+
+def atomic_write(path: Path, content: bytes) -> None:
+    """
+    Atomically write content to file using temp + fsync + rename.
+
+    Guarantees:
+    - Partial writes are never visible
+    - Original file remains intact until replacement is complete
+    - Content is synced to disk before rename
+
+    Args:
+        path: Target file path
+        content: Bytes to write
+
+    Raises:
+        OSError: If write or rename fails
+
+    Examples:
+        >>> from pathlib import Path
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmpdir:
+        ...     target = Path(tmpdir) / "test.txt"
+        ...     atomic_write(target, b"hello world")
+        ...     target.read_bytes()
+        b'hello world'
+    """
+    # Ensure parent directory exists
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write to temp file in same directory (for atomic rename)
+    fd, temp_path = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp"
+    )
+
+    try:
+        # Write content
+        os.write(fd, content)
+
+        # Flush to disk
+        os.fsync(fd)
+
+        # Close file descriptor
+        os.close(fd)
+        fd = -1
+
+        # Atomic replace (POSIX guarantees atomicity)
+        os.replace(temp_path, path)
+
+    except Exception:
+        # Clean up temp file on failure
+        if fd >= 0:
+            os.close(fd)
+        try:
+            os.unlink(temp_path)
+        except Exception:
+            pass
+        raise
+
+
+def parse_after_edit_ok(path: Path) -> bool:
+    """
+    Verify file is syntactically valid after edit.
+
+    Determines language from file extension and validates syntax.
+
+    Args:
+        path: Path to file to validate
+
+    Returns:
+        True if file parses successfully, False otherwise
+
+    Examples:
+        >>> from pathlib import Path
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as tmpdir:
+        ...     test_file = Path(tmpdir) / "test.py"
+        ...     test_file.write_text("x = 1 + 2")
+        ...     parse_after_edit_ok(test_file)
+        ...     test_file.write_text("x = 1 +")
+        ...     parse_after_edit_ok(test_file)
+        9
+        True
+        7
+        False
+    """
+    if not path.exists():
+        return False
+
+    # Determine language from extension
+    suffix = path.suffix.lower()
+
+    if suffix == ".py":
+        return verify_parseable(str(path), "python")
+    elif suffix in {".md", ".markdown"}:
+        return verify_parseable(str(path), "markdown")
+    elif suffix in {".yml", ".yaml"}:
+        return verify_parseable(str(path), "yaml")
+    elif suffix in {".sh", ".bash"}:
+        return verify_parseable(str(path), "shell")
+    else:
+        # Unknown language - assume valid
+        return True
 
 
 def create_backup(target_path: str, backup_dir: str) -> str:

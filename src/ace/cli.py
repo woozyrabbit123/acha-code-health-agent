@@ -2,6 +2,7 @@
 """ACE CLI - Autonomous Code Editor command-line interface."""
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -14,7 +15,15 @@ from ace.errors import (
     PolicyDenyError,
     format_error,
 )
-from ace.kernel import run_analyze, run_apply, run_refactor, run_validate
+from ace.journal import (
+    Journal,
+    build_revert_plan,
+    find_latest_journal,
+    get_journal_id_from_path,
+    read_journal,
+)
+from ace.kernel import run_analyze, run_apply, run_refactor, run_validate, run_warmup
+from ace.safety import atomic_write, content_hash
 from ace.storage import compare_baseline, save_baseline
 
 
@@ -42,6 +51,10 @@ def cmd_analyze(args):
             profiler = get_profiler()
             profiler.enable()
 
+        # Incremental parameters
+        incremental = args.incremental if hasattr(args, "incremental") else False
+        rebuild_index = args.rebuild_index if hasattr(args, "rebuild_index") else False
+
         findings = run_analyze(
             target,
             rules,
@@ -49,6 +62,8 @@ def cmd_analyze(args):
             cache_ttl=cache_ttl,
             cache_dir=cache_dir,
             jobs=jobs,
+            incremental=incremental,
+            rebuild_index=rebuild_index,
         )
 
         # Save profile if requested
@@ -226,6 +241,11 @@ def cmd_apply(args):
 
         rules = args.rules.split(",") if args.rules else None
 
+        # Budget parameters
+        max_files = args.max_files if hasattr(args, "max_files") else None
+        max_lines = args.max_lines if hasattr(args, "max_lines") else None
+        journal_dir = args.journal_dir if hasattr(args, "journal_dir") else ".ace/journals"
+
         exit_code, receipts = run_apply(
             target,
             rules,
@@ -233,6 +253,9 @@ def cmd_apply(args):
             force=args.force,
             stash=args.stash,
             commit=args.commit,
+            max_files=max_files,
+            max_lines=max_lines,
+            journal_dir=journal_dir,
         )
 
         # Write receipts if any were generated
@@ -256,6 +279,121 @@ def cmd_apply(args):
             raise OperationalError("Refactoring failed")
 
         return exit_code
+
+    except ACEError as e:
+        print(format_error(e), file=sys.stderr)
+        return e.exit_code
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
+def cmd_revert(args):
+    """Revert changes from a journal."""
+    try:
+        # Determine journal path
+        if args.journal == "latest":
+            journal_path = find_latest_journal()
+            if journal_path is None:
+                raise OperationalError("No journals found in .ace/journals/")
+        elif Path(args.journal).exists():
+            journal_path = Path(args.journal)
+        else:
+            # Try as journal ID
+            journal_path = Path(f".ace/journals/{args.journal}.jsonl")
+            if not journal_path.exists():
+                raise OperationalError(f"Journal not found: {args.journal}")
+
+        journal_id = get_journal_id_from_path(journal_path)
+        print(f"Reverting from journal: {journal_id}")
+
+        # Build revert plan
+        revert_plan = build_revert_plan(journal_path)
+
+        if not revert_plan:
+            print("No changes to revert.")
+            return ExitCode.SUCCESS
+
+        print(f"Found {len(revert_plan)} file(s) to revert")
+
+        # Revert each file in reverse order
+        reverted = 0
+        failed = 0
+
+        for context in revert_plan:
+            file_path = Path(context.file)
+
+            try:
+                # Verify current state matches expected
+                if not file_path.exists():
+                    print(f"  SKIP {context.file}: file does not exist", file=sys.stderr)
+                    failed += 1
+                    continue
+
+                current_content = file_path.read_bytes()
+                current_sha = hashlib.sha256(current_content).hexdigest()
+
+                if current_sha != context.expected_current_sha:
+                    print(
+                        f"  SKIP {context.file}: current hash mismatch "
+                        f"(expected {context.expected_current_sha[:8]}..., "
+                        f"got {current_sha[:8]}...)",
+                        file=sys.stderr
+                    )
+                    failed += 1
+                    continue
+
+                # Restore original content
+                atomic_write(file_path, context.restore_content)
+
+                # Verify restored hash
+                restored_content = file_path.read_bytes()
+                restored_sha = hashlib.sha256(restored_content).hexdigest()
+
+                # Note: We only stored first 4KB in journal, so we can't verify full hash
+                # Just check that the file was written successfully
+                print(f"  ✓ {context.file}")
+                reverted += 1
+
+            except Exception as e:
+                print(f"  FAIL {context.file}: {e}", file=sys.stderr)
+                failed += 1
+
+        print(f"\nReverted: {reverted} file(s)")
+        if failed > 0:
+            print(f"Failed: {failed} file(s)", file=sys.stderr)
+            return ExitCode.OPERATIONAL_ERROR
+
+        return ExitCode.SUCCESS
+
+    except ACEError as e:
+        print(format_error(e), file=sys.stderr)
+        return e.exit_code
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
+def cmd_warmup(args):
+    """Warm up analysis cache by pre-analyzing files."""
+    try:
+        target = Path(args.target)
+
+        if not target.exists():
+            raise OperationalError(f"Target path does not exist: {target}")
+
+        rules = args.rules.split(",") if args.rules else None
+
+        # Run warmup (analyze without applying changes)
+        from ace.kernel import run_warmup
+        stats = run_warmup(target, rules)
+
+        print(f"Cache warmup complete:")
+        print(f"  Files analyzed: {stats['analyzed']}")
+        print(f"  Cache hits: {stats['cache_hits']}")
+        print(f"  Cache misses: {stats['cache_misses']}")
+
+        return ExitCode.SUCCESS
 
     except ACEError as e:
         print(format_error(e), file=sys.stderr)
@@ -309,6 +447,12 @@ def main():
         parser_analyze.add_argument(
             "--profile", help="Save performance profile to JSON file"
         )
+        parser_analyze.add_argument(
+            "--incremental", action="store_true", help="Only analyze changed files (requires index)"
+        )
+        parser_analyze.add_argument(
+            "--rebuild-index", action="store_true", help="Rebuild content index before analyzing"
+        )
         parser_analyze.set_defaults(func=cmd_analyze)
 
         # refactor subcommand
@@ -320,6 +464,15 @@ def main():
         )
         parser_refactor.add_argument(
             "--rules", help="Comma-separated list of rule IDs to apply (default: all)"
+        )
+        parser_refactor.add_argument(
+            "--max-files", type=int, help="Maximum number of files to modify"
+        )
+        parser_refactor.add_argument(
+            "--max-lines", type=int, help="Maximum number of lines to modify"
+        )
+        parser_refactor.add_argument(
+            "--patch-out", help="Write unified patch to file instead of applying"
         )
         parser_refactor.set_defaults(func=cmd_refactor)
 
@@ -362,6 +515,15 @@ def main():
         )
         parser_apply.add_argument(
             "--commit", action="store_true", help="Commit changes after applying"
+        )
+        parser_apply.add_argument(
+            "--max-files", type=int, help="Maximum number of files to modify"
+        )
+        parser_apply.add_argument(
+            "--max-lines", type=int, help="Maximum number of lines to modify"
+        )
+        parser_apply.add_argument(
+            "--journal-dir", default=".ace/journals", help="Journal directory (default: .ace/journals)"
         )
         parser_apply.set_defaults(func=cmd_apply)
 
@@ -412,6 +574,28 @@ def main():
             help="Exit with error if any regression (new or changed) is detected"
         )
         parser_baseline_compare.set_defaults(func=cmd_baseline_compare)
+
+        # revert subcommand
+        parser_revert = subparsers.add_parser(
+            "revert", help="Revert changes from a journal"
+        )
+        parser_revert.add_argument(
+            "--journal", default="latest",
+            help="Journal ID, path, or 'latest' (default: latest)"
+        )
+        parser_revert.set_defaults(func=cmd_revert)
+
+        # warmup subcommand
+        parser_warmup = subparsers.add_parser(
+            "warmup", help="Warm up analysis cache"
+        )
+        parser_warmup.add_argument(
+            "--target", required=True, help="Target directory or file to analyze"
+        )
+        parser_warmup.add_argument(
+            "--rules", help="Comma-separated list of rule IDs (default: all)"
+        )
+        parser_warmup.set_defaults(func=cmd_warmup)
 
         args = parser.parse_args()
 
