@@ -6,6 +6,20 @@ Lightweight timers that write to .ace/telemetry.jsonl for performance analysis.
 v2 enhancements:
 - Append JSONL {rule_id, ms, files, ok, reverted} per execution
 - summary(days=7) aggregates mean, p95, count
+
+DETERMINISM NOTE:
+Telemetry data intentionally includes timestamps (time.time()) for performance
+tracking and time-series analysis. This is separate from core analysis outputs
+(like symbols.json) which are deterministic. The guarantee "same input → same
+output" applies to analysis results, not to telemetry logs.
+
+Telemetry timestamps are used for:
+- Performance regression detection
+- Time-based filtering (e.g., last 7 days)
+- Execution time correlation
+
+Core analysis outputs (symbols.json, SARIF reports) do NOT contain timestamps
+and are fully deterministic as of v2.1.
 """
 
 import json

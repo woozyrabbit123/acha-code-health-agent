@@ -141,6 +141,11 @@ def _fsync_dir(directory: Path) -> None:
     Fsync directory to ensure rename is persisted.
 
     Best-effort operation (some platforms don't support directory fsync).
+    Windows and some NFS mounts don't support directory fsync and will
+    raise OSError, which is caught and ignored gracefully.
+
+    This function is tested for Windows compatibility in:
+    tests/ace/test_safety_atomic_write.py::test_atomic_write_fsync_dir_failure
 
     Args:
         directory: Directory to fsync
