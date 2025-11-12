@@ -13,11 +13,13 @@ from ace.budget import BudgetConstraints, apply_budget, format_excluded_summary
 from ace.errors import ExitCode
 from ace.fileio import read_text_file, write_text_preserving_style
 from ace.git_safety import check_git_safety, git_commit_changes, git_stash_changes
+from ace.guard import guard_python_edit
 from ace.index import ContentIndex, is_indexable
 from ace.journal import Journal
 from ace.perf import get_profiler
 from ace.receipts import Receipt, create_receipt
 from ace.safety import atomic_write, content_hash, is_idempotent, parse_after_edit_ok
+from ace.skiplist import Skiplist, add_plan_to_skiplist
 from ace.skills.config import analyze_yaml_duplicate_keys
 from ace.skills.markdown import analyze_markdown_dangerous_commands
 from ace.skills.python import (
@@ -208,12 +210,24 @@ def run_analyze(
             return (file_index, [])
 
     # Collect files to analyze
+    MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
+
     if target_path.is_file():
         files = [target_path]
     else:
         # Collect all files (sorted for determinism)
         files = sorted(target_path.rglob("*"))
-        files = [f for f in files if f.is_file() and is_indexable(f)]
+        # Filter: must be file, indexable, and not too large (skip binaries >5MB)
+        filtered_files = []
+        for f in files:
+            if f.is_file() and is_indexable(f):
+                try:
+                    if f.stat().st_size <= MAX_FILE_SIZE:
+                        filtered_files.append(f)
+                except Exception:
+                    # Skip files we can't stat
+                    pass
+        files = filtered_files
 
     # Apply incremental filtering if requested
     if incremental or rebuild_index:
@@ -350,6 +364,11 @@ def run_refactor(
                 if plan.edits:
                     plans.append(plan)
 
+            elif rule_id == "PY-S201-SUBPROCESS-CHECK":
+                _, plan = refactor_subprocess_check(content, file_path_str, rule_findings)
+                if plan.edits:
+                    plans.append(plan)
+
             # Detect-only rules (MD, YML, SH) don't generate refactoring plans
 
         except Exception:
@@ -477,6 +496,9 @@ def run_apply(
     run_id = str(uuid.uuid4())
     journal = Journal(run_id=run_id, journal_dir=Path(journal_dir))
 
+    # Initialize skiplist for auto-learning
+    skiplist = Skiplist()
+
     modified_files = []
     receipts = []
 
@@ -551,25 +573,63 @@ def run_apply(
             after_content_bytes = edit.payload.encode("utf-8")
             after_sha = hashlib.sha256(after_content_bytes).hexdigest()
 
-            # Validate syntax after write
-            parse_valid = parse_after_edit_ok(file_path) if not dry_run else True
-
-            # Auto-revert if parse fails
+            # Patch Guard verification (auto-enabled for Python files)
+            parse_valid = True
+            guard_passed = True
             reverted = False
-            if not parse_valid and not dry_run:
-                # Restore original content
-                atomic_write(file_path, before_content_bytes)
 
-                # Log revert in journal
-                journal.log_revert(
-                    file=str(file_path),
-                    from_sha=after_sha,
-                    to_sha=before_sha,
-                    reason="parse-fail"
+            if file_path.suffix == ".py" and not dry_run:
+                # Run Patch Guard verification
+                guard_result = guard_python_edit(
+                    file_path=file_path,
+                    before_content=original_content,
+                    after_content=edit.payload,
+                    strict=False  # Allow semantic changes (not just style)
                 )
 
-                reverted = True
-                print(f"⚠️  Auto-reverted {file_path}: parse check failed", file=sys.stderr)
+                guard_passed = guard_result.passed
+                parse_valid = guard_result.passed
+
+                # Auto-revert if guard fails
+                if not guard_passed:
+                    # Restore original content
+                    atomic_write(file_path, before_content_bytes)
+
+                    # Log revert in journal
+                    journal.log_revert(
+                        file=str(file_path),
+                        from_sha=after_sha,
+                        to_sha=before_sha,
+                        reason=f"guard-fail:{guard_result.guard_type}"
+                    )
+
+                    reverted = True
+                    error_msg = "; ".join(guard_result.errors)
+                    print(f"⚠️  Auto-reverted {file_path}: Patch Guard failed ({guard_result.guard_type}) - {error_msg}", file=sys.stderr)
+
+                    # Auto-learn: Add to skiplist to avoid repeating this fix
+                    add_plan_to_skiplist(plan, skiplist, reason="auto-revert:guard-fail")
+
+            elif not dry_run:
+                # For non-Python files, just check parse (legacy behavior)
+                parse_valid = parse_after_edit_ok(file_path)
+                if not parse_valid:
+                    # Restore original content
+                    atomic_write(file_path, before_content_bytes)
+
+                    # Log revert in journal
+                    journal.log_revert(
+                        file=str(file_path),
+                        from_sha=after_sha,
+                        to_sha=before_sha,
+                        reason="parse-fail"
+                    )
+
+                    reverted = True
+                    print(f"⚠️  Auto-reverted {file_path}: parse check failed", file=sys.stderr)
+
+                    # Auto-learn: Add to skiplist to avoid repeating this fix
+                    add_plan_to_skiplist(plan, skiplist, reason="auto-revert:parse-fail")
 
             # Calculate duration
             end_time = time.perf_counter()

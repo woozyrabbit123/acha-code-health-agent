@@ -1,14 +1,19 @@
 """ACE configuration management with precedence handling."""
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-try:
-    import tomllib  # Python 3.11+
-except ImportError:
-    import tomli as tomllib  # Fallback for Python 3.9-3.10
+# Python 3.11+ has tomllib built-in, earlier versions need tomli
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        tomllib = None  # type: ignore
 
 
 @dataclass

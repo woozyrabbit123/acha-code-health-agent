@@ -1,5 +1,8 @@
 """ACE quick detect rules (cheap AST/regex checks)."""
 
+import os
+from pathlib import Path
+
 import libcst as cst
 from libcst.metadata import MetadataWrapper, PositionProvider
 
@@ -17,14 +20,18 @@ def analyze_assert_in_nontest(src: str, path: str) -> list[UnifiedIssue]:
     Returns:
         List of UnifiedIssue findings
     """
+    # Normalize path for cross-platform compatibility
+    norm_path = os.path.normpath(path).replace(os.sep, "/").lower()
+    path_parts = norm_path.split("/")
+    basename = path_parts[-1] if path_parts else ""
+
     # Check if this is a test file
-    path_lower = path.lower()
     is_test_file = (
-        "/tests/" in path_lower
-        or "/test/" in path_lower
-        or path_lower.endswith("_test.py")
-        or path_lower.endswith("test_.py")
-        or "test_" in path_lower.split("/")[-1]
+        "/tests/" in norm_path
+        or "/test/" in norm_path
+        or basename.endswith("_test.py")
+        or basename.endswith("test_.py")
+        or basename.startswith("test_")
     )
 
     if is_test_file:
@@ -74,9 +81,11 @@ def analyze_print_in_src(src: str, path: str) -> list[UnifiedIssue]:
     Returns:
         List of UnifiedIssue findings
     """
+    # Normalize path for cross-platform compatibility
+    norm_path = os.path.normpath(path).replace(os.sep, "/").lower()
+
     # Check if this is a src file
-    path_lower = path.lower()
-    is_src_file = "/src/" in path_lower
+    is_src_file = "/src/" in norm_path
 
     if not is_src_file:
         return []

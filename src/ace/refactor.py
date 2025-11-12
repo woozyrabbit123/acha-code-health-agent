@@ -126,19 +126,20 @@ def synthesize_pack_plan(
             stable = finding.to_dict()["stable_id"]
             finding_to_plan[stable] = plan
 
-    # Collect plans that belong to this pack
+    # Collect plans that belong to this pack (filter out plans with no edits)
     pack_plans = []
     for finding in pack.findings:
         stable = finding.to_dict()["stable_id"]
         if stable in finding_to_plan:
             plan = finding_to_plan[stable]
-            if plan not in pack_plans:
+            # Only include plans that actually have edits
+            if plan.edits and plan not in pack_plans:
                 pack_plans.append(plan)
 
     if not pack_plans:
         return None
 
-    # Collect all edits from pack plans
+    # Collect all edits from pack plans (only plans with edits)
     all_edits = []
     all_invariants = []
     max_risk = 0.0

@@ -25,6 +25,8 @@ from ace.journal import (
 from ace.kernel import run_analyze, run_apply, run_refactor, run_validate, run_warmup
 from ace.safety import atomic_write, content_hash
 from ace.storage import compare_baseline, save_baseline
+from ace.policy_config import load_policy_config
+from ace.skiplist import Skiplist
 
 
 def cmd_analyze(args):
@@ -316,6 +318,9 @@ def cmd_revert(args):
 
         print(f"Found {len(revert_plan)} file(s) to revert")
 
+        # Initialize skiplist for auto-learning
+        skiplist = Skiplist()
+
         # Revert each file in reverse order
         reverted = 0
         failed = 0
@@ -354,6 +359,16 @@ def cmd_revert(args):
                 # Just check that the file was written successfully
                 print(f"  ✓ {context.file}")
                 reverted += 1
+
+                # Auto-learn: Add reverted rules to skiplist
+                for rule_id in context.rule_ids:
+                    # Use file as context, and a generic content marker
+                    skiplist.add(
+                        rule_id=rule_id,
+                        content=f"manual-revert:{context.plan_id}",
+                        context_path=context.file,
+                        reason="manual-revert"
+                    )
 
             except Exception as e:
                 print(f"  FAIL {context.file}: {e}", file=sys.stderr)
@@ -398,6 +413,299 @@ def cmd_warmup(args):
     except ACEError as e:
         print(format_error(e), file=sys.stderr)
         return e.exit_code
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
+def cmd_watch(args):
+    """Watch files for changes and auto-analyze."""
+    import time
+    from ace.index import ContentIndex
+
+    try:
+        target = Path(args.target)
+        if not target.exists():
+            raise OperationalError(f"Target path does not exist: {target}")
+
+        rules = args.rules.split(",") if args.rules else None
+        interval = args.interval if hasattr(args, "interval") else 5
+
+        print(f"Watching {target} for changes (interval: {interval}s)...")
+
+        index = ContentIndex()
+        index.load()
+
+        while True:
+            # Get all files
+            if target.is_file():
+                files = [target]
+            else:
+                from ace.index import is_indexable
+                files = sorted(target.rglob("*"))
+                files = [f for f in files if f.is_file() and is_indexable(f)]
+
+            # Check for changes
+            changed_files = index.get_changed_files(files)
+
+            if changed_files:
+                print(f"\n{len(changed_files)} file(s) changed, analyzing...")
+                findings = run_analyze(target, rules, use_cache=True)
+
+                if findings:
+                    print(f"Found {len(findings)} issue(s):")
+                    for f in findings[:10]:  # Show first 10
+                        print(f"  {f.file}:{f.line} [{f.rule}] {f.message}")
+                    if len(findings) > 10:
+                        print(f"  ... and {len(findings) - 10} more")
+                else:
+                    print("No issues found")
+
+                # Update index
+                for file_path in changed_files:
+                    try:
+                        index.add_file(file_path)
+                    except Exception:
+                        pass
+                index.save()
+
+            time.sleep(interval)
+
+    except KeyboardInterrupt:
+        print("\nWatch stopped")
+        return ExitCode.SUCCESS
+    except ACEError as e:
+        print(format_error(e), file=sys.stderr)
+        return e.exit_code
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
+def cmd_report(args):
+    """Generate analysis report."""
+    try:
+        target = Path(args.target)
+        if not target.exists():
+            raise OperationalError(f"Target path does not exist: {target}")
+
+        rules = args.rules.split(",") if args.rules else None
+        output_format = args.format if hasattr(args, "format") else "text"
+        output_file = args.output if hasattr(args, "output") else None
+
+        # Run analysis
+        findings = run_analyze(target, rules)
+
+        # Generate report based on format
+        if output_format == "json":
+            report = json.dumps([f.to_dict() for f in findings], indent=2, sort_keys=True)
+        elif output_format == "sarif":
+            # Basic SARIF format
+            report = json.dumps({
+                "version": "2.1.0",
+                "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+                "runs": [{
+                    "tool": {
+                        "driver": {
+                            "name": "ACE",
+                            "version": __version__
+                        }
+                    },
+                    "results": [{
+                        "ruleId": f.rule,
+                        "level": f.severity.value,
+                        "message": {"text": f.message},
+                        "locations": [{
+                            "physicalLocation": {
+                                "artifactLocation": {"uri": f.file},
+                                "region": {"startLine": f.line}
+                            }
+                        }]
+                    } for f in findings]
+                }]
+            }, indent=2)
+        else:  # text format
+            report = f"ACE Analysis Report\n"
+            report += f"=" * 60 + "\n\n"
+            report += f"Total findings: {len(findings)}\n\n"
+
+            # Group by severity
+            by_severity = {}
+            for f in findings:
+                sev = f.severity.value
+                if sev not in by_severity:
+                    by_severity[sev] = []
+                by_severity[sev].append(f)
+
+            for severity in ["high", "medium", "low"]:
+                if severity in by_severity:
+                    report += f"\n{severity.upper()} ({len(by_severity[severity])})\n"
+                    report += "-" * 60 + "\n"
+                    for f in by_severity[severity]:
+                        report += f"{f.file}:{f.line} [{f.rule}]\n"
+                        report += f"  {f.message}\n"
+                        if f.suggestion:
+                            report += f"  Suggestion: {f.suggestion}\n"
+                        report += "\n"
+
+        # Write or print report
+        if output_file:
+            Path(output_file).write_text(report)
+            print(f"Report written to {output_file}")
+        else:
+            print(report)
+
+        return ExitCode.SUCCESS
+
+    except ACEError as e:
+        print(format_error(e), file=sys.stderr)
+        return e.exit_code
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
+def cmd_policy(args):
+    """Manage policy configuration."""
+    try:
+        subcommand = args.policy_command if hasattr(args, "policy_command") else None
+
+        if subcommand == "show":
+            # Show current policy
+            policy_path = Path(args.policy_file) if hasattr(args, "policy_file") else Path("policy.toml")
+            if policy_path.exists():
+                policy = load_policy_config(policy_path)
+                print(f"Policy: {policy.description}")
+                print(f"Version: {policy.version}")
+                print(f"\nScoring weights:")
+                print(f"  Severity (α): {policy.alpha}")
+                print(f"  Complexity (β): {policy.beta}")
+                print(f"  Cohesion (γ): {policy.gamma}")
+                print(f"\nThresholds:")
+                print(f"  Auto-apply: R* ≥ {policy.auto_threshold}")
+                print(f"  Suggest: R* ≥ {policy.suggest_threshold}")
+                print(f"  Report: R* ≥ {policy.report_threshold}")
+            else:
+                print(f"Policy file not found: {policy_path}")
+                return ExitCode.OPERATIONAL_ERROR
+        else:
+            print("Usage: ace policy show [--policy-file PATH]")
+            return ExitCode.INVALID_ARGS
+
+        return ExitCode.SUCCESS
+
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
+def cmd_selftest(args):
+    """Run determinism self-test (analyze twice, compare receipts)."""
+    try:
+        target = Path(args.target)
+        if not target.exists():
+            raise OperationalError(f"Target path does not exist: {target}")
+
+        rules = args.rules.split(",") if args.rules else None
+
+        print("Running determinism self-test...")
+        print("  Pass 1/2: Analyzing...")
+
+        # Run 1
+        findings1 = run_analyze(target, rules)
+        plans1 = run_refactor(target, rules)
+
+        print(f"  Pass 1: {len(findings1)} findings, {len(plans1)} plans")
+        print("  Pass 2/2: Analyzing...")
+
+        # Run 2
+        findings2 = run_analyze(target, rules)
+        plans2 = run_refactor(target, rules)
+
+        print(f"  Pass 2: {len(findings2)} findings, {len(plans2)} plans")
+
+        # Compare findings
+        findings1_dict = [f.to_dict() for f in findings1]
+        findings2_dict = [f.to_dict() for f in findings2]
+
+        findings_match = findings1_dict == findings2_dict
+
+        # Compare plans
+        plans1_dict = [p.to_dict() for p in plans1]
+        plans2_dict = [p.to_dict() for p in plans2]
+
+        plans_match = plans1_dict == plans2_dict
+
+        # Report results
+        print("\nResults:")
+        print(f"  Findings match: {'✓ YES' if findings_match else '✗ NO'}")
+        print(f"  Plans match:    {'✓ YES' if plans_match else '✗ NO'}")
+
+        if findings_match and plans_match:
+            print("\n✓ Determinism self-test PASSED")
+            return ExitCode.SUCCESS
+        else:
+            print("\n✗ Determinism self-test FAILED")
+            print("\nDifferences detected:")
+
+            if not findings_match:
+                print(f"  Findings differ: {len(findings1)} vs {len(findings2)}")
+
+            if not plans_match:
+                print(f"  Plans differ: {len(plans1)} vs {len(plans2)}")
+
+            return ExitCode.OPERATIONAL_ERROR
+
+    except ACEError as e:
+        print(format_error(e), file=sys.stderr)
+        return e.exit_code
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
+def cmd_explain(args):
+    """Explain findings or rules."""
+    try:
+        if hasattr(args, "rule") and args.rule:
+            # Explain a specific rule
+            rule_id = args.rule.upper()
+
+            # Rule documentation (simplified)
+            rule_docs = {
+                "PY-S101-UNSAFE-HTTP": "HTTP requests without timeout can hang indefinitely. Add timeout parameter.",
+                "PY-S201-SUBPROCESS-CHECK": "subprocess.run() without check=True ignores errors. Add check=True.",
+                "PY-S202-SUBPROCESS-SHELL": "shell=True is dangerous with user input. Use shell=False and pass list.",
+                "PY-S203-SUBPROCESS-STRING-CMD": "String commands with shell are vulnerable to injection. Use list format.",
+                "PY-E201-BROAD-EXCEPT": "Bare except catches all errors including system exits. Be more specific.",
+                "PY-I101-IMPORT-SORT": "Imports should be sorted for consistency and readability.",
+                "PY-Q201-ASSERT-IN-NONTEST": "assert is for tests only. Use proper error handling in production code.",
+                "PY-Q202-PRINT-IN-SRC": "print() in source code should be replaced with proper logging.",
+                "PY-Q203-EVAL-EXEC": "eval() and exec() execute arbitrary code and are dangerous. Avoid them.",
+                "PY-S310-TRAILING-WS": "Trailing whitespace should be removed for clean code.",
+                "PY-S311-EOF-NL": "Files should end with a newline for POSIX compliance.",
+                "PY-S312-BLANKLINES": "Excessive blank lines reduce readability.",
+                "MD-S001-DANGEROUS-COMMAND": "Dangerous shell commands in markdown documentation.",
+                "YML-F001-DUPLICATE-KEY": "Duplicate YAML keys cause undefined behavior.",
+                "SH-S001-MISSING-STRICT-MODE": "Shell scripts should use 'set -euo pipefail' for safety.",
+            }
+
+            if rule_id in rule_docs:
+                print(f"Rule: {rule_id}")
+                print(f"\n{rule_docs[rule_id]}")
+            else:
+                print(f"Unknown rule: {rule_id}")
+                return ExitCode.OPERATIONAL_ERROR
+
+        elif hasattr(args, "finding_id") and args.finding_id:
+            print("Finding explanation not yet implemented")
+            return ExitCode.OPERATIONAL_ERROR
+        else:
+            print("Usage: ace explain --rule RULE_ID")
+            return ExitCode.INVALID_ARGS
+
+        return ExitCode.SUCCESS
+
     except Exception as e:
         print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
         return ExitCode.OPERATIONAL_ERROR
@@ -452,6 +760,15 @@ def main():
         )
         parser_analyze.add_argument(
             "--rebuild-index", action="store_true", help="Rebuild content index before analyzing"
+        )
+        parser_analyze.add_argument(
+            "--fast", action="store_true", help="Fast mode: skip slower checks, prefer cache"
+        )
+        parser_analyze.add_argument(
+            "--safe", action="store_true", help="Safe mode: enable all guards and thorough checks"
+        )
+        parser_analyze.add_argument(
+            "--silent", action="store_true", help="Silent mode: suppress non-error output"
         )
         parser_analyze.set_defaults(func=cmd_analyze)
 
@@ -525,6 +842,15 @@ def main():
         parser_apply.add_argument(
             "--journal-dir", default=".ace/journals", help="Journal directory (default: .ace/journals)"
         )
+        parser_apply.add_argument(
+            "--fast", action="store_true", help="Fast mode: skip some verification checks"
+        )
+        parser_apply.add_argument(
+            "--safe", action="store_true", help="Safe mode: enable strict guards and thorough verification"
+        )
+        parser_apply.add_argument(
+            "--silent", action="store_true", help="Silent mode: suppress non-error output"
+        )
         parser_apply.set_defaults(func=cmd_apply)
 
         # baseline subcommands
@@ -596,6 +922,82 @@ def main():
             "--rules", help="Comma-separated list of rule IDs (default: all)"
         )
         parser_warmup.set_defaults(func=cmd_warmup)
+
+        # watch subcommand
+        parser_watch = subparsers.add_parser(
+            "watch", help="Watch files for changes and auto-analyze"
+        )
+        parser_watch.add_argument(
+            "--target", required=True, help="Target directory or file to watch"
+        )
+        parser_watch.add_argument(
+            "--rules", help="Comma-separated list of rule IDs (default: all)"
+        )
+        parser_watch.add_argument(
+            "--interval", type=int, default=5, help="Check interval in seconds (default: 5)"
+        )
+        parser_watch.set_defaults(func=cmd_watch)
+
+        # report subcommand
+        parser_report = subparsers.add_parser(
+            "report", help="Generate analysis report"
+        )
+        parser_report.add_argument(
+            "--target", required=True, help="Target directory or file to analyze"
+        )
+        parser_report.add_argument(
+            "--rules", help="Comma-separated list of rule IDs (default: all)"
+        )
+        parser_report.add_argument(
+            "--format", choices=["text", "json", "sarif"], default="text",
+            help="Report format (default: text)"
+        )
+        parser_report.add_argument(
+            "--output", help="Output file path (default: stdout)"
+        )
+        parser_report.set_defaults(func=cmd_report)
+
+        # policy subcommands
+        parser_policy = subparsers.add_parser(
+            "policy", help="Manage policy configuration"
+        )
+        policy_subparsers = parser_policy.add_subparsers(
+            dest="policy_command", help="Policy commands"
+        )
+
+        # policy show
+        parser_policy_show = policy_subparsers.add_parser(
+            "show", help="Show current policy configuration"
+        )
+        parser_policy_show.add_argument(
+            "--policy-file", default="policy.toml",
+            help="Policy file path (default: policy.toml)"
+        )
+        parser_policy_show.set_defaults(func=cmd_policy)
+
+        # explain subcommand
+        parser_explain = subparsers.add_parser(
+            "explain", help="Explain findings or rules"
+        )
+        parser_explain.add_argument(
+            "--rule", help="Rule ID to explain"
+        )
+        parser_explain.add_argument(
+            "--finding-id", help="Finding ID to explain"
+        )
+        parser_explain.set_defaults(func=cmd_explain)
+
+        # selftest subcommand
+        parser_selftest = subparsers.add_parser(
+            "selftest", help="Run determinism self-test"
+        )
+        parser_selftest.add_argument(
+            "--target", required=True, help="Target directory or file to test"
+        )
+        parser_selftest.add_argument(
+            "--rules", help="Comma-separated list of rule IDs (default: all)"
+        )
+        parser_selftest.set_defaults(func=cmd_selftest)
 
         args = parser.parse_args()
 
