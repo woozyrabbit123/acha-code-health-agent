@@ -48,6 +48,16 @@
 
 ## Quickstart
 
+Get started in 30 seconds:
+
+```bash
+# Install ACE
+pip install acha-code-health[ace]
+
+# Run analysis on your project
+ace analyze --target ./sample_project
+```
+
 ### Installation
 
 **Option 1: Pre-built Binaries (Recommended for Pro)**

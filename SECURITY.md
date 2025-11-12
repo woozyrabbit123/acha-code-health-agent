@@ -72,6 +72,19 @@ Permissions: Inherit from user profile (ACL restricted)
 ⚠️ Add to .gitignore to avoid committing to version control!
 ```
 
+**.gitignore Example:**
+```gitignore
+# ACE/ACHA License Files (NEVER commit these!)
+license.json
+.acha/license.json
+*.license.json
+
+# ACE Working Directories
+.ace/
+reports/
+backups/
+```
+
 **Best practices:**
 ```bash
 # Linux/macOS - Restrict permissions

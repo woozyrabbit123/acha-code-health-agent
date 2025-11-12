@@ -4,6 +4,8 @@ Dead Imports Codemod - Remove unused imports (scope-aware).
 Guards: never touch __future__, typing.* if annotations present.
 """
 
+import logging
+
 import libcst as cst
 from libcst import matchers as m
 from libcst.metadata import Scope, QualifiedNameProvider, ScopeProvider
@@ -12,6 +14,8 @@ from typing import Optional, Set
 
 from ace.skills.python import EditPlan, Edit
 from ace.uir import create_uir
+
+logger = logging.getLogger(__name__)
 
 
 class ImportCollector(cst.CSTVisitor):
@@ -23,20 +27,24 @@ class ImportCollector(cst.CSTVisitor):
         self.imports = {}  # name -> Import node
         self.used_names = set()
 
-    def visit_Import(self, node: cst.Import) -> None:
-        """Track imports."""
+    def visit_Import(self, node: cst.Import) -> bool:
+        """Track imports and skip traversing into import nodes."""
         for name in node.names:
             if isinstance(name, cst.ImportAlias):
                 imported_name = name.asname.name.value if name.asname else name.name.value
                 self.imports[imported_name] = node
+        # Return False to prevent traversing into children (avoid counting import names as used)
+        return False
 
-    def visit_ImportFrom(self, node: cst.ImportFrom) -> None:
-        """Track from imports."""
+    def visit_ImportFrom(self, node: cst.ImportFrom) -> bool:
+        """Track from imports and skip traversing into import nodes."""
         if not isinstance(node.names, cst.ImportStar):
             for name in node.names:
                 if isinstance(name, cst.ImportAlias):
                     imported_name = name.asname.name.value if name.asname else name.name.value
                     self.imports[imported_name] = node
+        # Return False to prevent traversing into children (avoid counting import names as used)
+        return False
 
     def visit_Name(self, node: cst.Name) -> None:
         """Track name usage."""
@@ -131,7 +139,8 @@ class DeadImportsCodemod:
         """Generate edit plan."""
         try:
             tree = cst.parse_module(source_code)
-        except Exception:
+        except cst.ParserSyntaxError as e:
+            logger.warning(f"Failed to parse {file_path}: {e}")
             return None
 
         # Check for annotations
@@ -142,8 +151,9 @@ class DeadImportsCodemod:
         try:
             wrapper = cst.MetadataWrapper(tree)
             wrapper.visit(collector)
-        except Exception:
+        except (ValueError, TypeError) as e:
             # Fallback to simple visitor if metadata fails
+            logger.warning(f"Metadata analysis failed for {file_path}, using fallback: {e}")
             tree.visit(collector)
 
         # Find unused imports

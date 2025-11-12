@@ -5,9 +5,12 @@ One-command workflow for automated code health improvements.
 """
 
 import json
+import logging
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from ace.budget import BudgetConstraints, apply_budget
 from ace.errors import ACEError, ExitCode, OperationalError
@@ -325,8 +328,8 @@ def run_autopilot(cfg: AutopilotConfig) -> tuple[ExitCode, AutopilotStats]:
                     file_path = Path(receipt.file)
                     if file_path.exists():
                         index.add_file(file_path)
-                except Exception:
-                    pass
+                except (OSError, ValueError) as e:
+                    logger.warning(f"Failed to add file {receipt.file} to index: {e}")
             index.save()
 
         # Step 12: Write session log
