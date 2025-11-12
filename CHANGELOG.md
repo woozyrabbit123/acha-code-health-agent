@@ -5,6 +5,79 @@ All notable changes to the ACHA/ACE (Autonomous Code-Health Agent / Autonomous C
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [ACE 2.1.0] - 2025-01-13
+
+### Fixed - ACE v2.1 Codex Audit (P0/P1)
+
+This release addresses all critical and high-priority findings from the comprehensive ACE v2.1 Full Codex Audit.
+
+#### P0 Fixes (Critical - Blocking Production)
+
+- **Dependencies**: Moved mandatory runtime dependencies to core requirements
+  - `libcst`, `markdown-it-py`, `pyyaml`, and `textual` now in base `dependencies` array
+  - Fixes `ModuleNotFoundError` on CLI startup in default installations
+  - Eliminates need for `pip install acha-code-health[ace]` extras
+  - File: `pyproject.toml`
+
+- **Determinism**: Removed non-deterministic timestamp from symbol index
+  - Symbol index serialization no longer embeds `generated_at = int(time.time())`
+  - Consecutive `ace index build` runs now produce identical SHA256 hashes
+  - Enables reproducible builds and cache invalidation
+  - File: `src/ace/repomap.py`
+
+- **Security**: Enforced PatchGuard AST hash verification
+  - AST hash mismatches now fail in strict mode (previously `pass`)
+  - Detects semantic tampering via CST-only transforms
+  - Returns `GuardResult(passed=False, guard_type="ast_hash")` on hash divergence
+  - File: `src/ace/guard.py`
+
+#### P1 Fixes (High Priority)
+
+- **Determinism**: Made context ranking use deterministic timestamps
+  - Added optional `current_time` parameter to `ContextRanker.__init__()`
+  - Recency boost calculation uses stored timestamp instead of live `time.time()` calls
+  - Ranking order no longer drifts with wall-clock time
+  - File: `src/ace/context_rank.py`
+
+- **Security**: Hardened subprocess execution with `check=True`
+  - TUI subprocess calls now use `check=True` and explicit path resolution via `shutil.which()`
+  - CLI git subprocess calls now use `check=True` and specific exception handling
+  - Improved error handling with `CalledProcessError` and `TimeoutExpired` exceptions
+  - Files: `src/ace/tui/app.py`, `src/ace/cli.py`
+
+- **CI**: Aligned Python version matrix with package requirements
+  - CI matrix changed from `['3.10', '3.11']` to `['3.11', '3.12']`
+  - Now matches `requires-python = ">=3.11"` in `pyproject.toml`
+  - File: `.github/workflows/ci.yml`
+
+- **Dev Dependencies**: Fixed invalid package pins
+  - Updated `ruff==0.8.0` (non-existent) to `ruff==0.6.9` (published)
+  - Added `build==1.2.2` for packaging tooling
+  - File: `requirements-dev.txt`
+
+- **Durability**: Extended atomic write guarantees to all persistence layers
+  - Skiplist persistence now uses `atomic_write` (write → fsync → rename → dir fsync)
+  - Content index persistence now uses `atomic_write` (previously plain `open()`)
+  - Prevents corruption on power loss or crash
+  - Files: `src/ace/skiplist.py`, `src/ace/index.py`
+
+- **Maintainability**: Consolidated policy threshold constants
+  - Imported `DEFAULT_ALPHA`, `DEFAULT_BETA`, `AUTO_THRESHOLD`, `SUGGEST_THRESHOLD` from `policy.py`
+  - Eliminated hardcoded duplicates in `PolicyConfig` dataclass
+  - Single source of truth prevents drift between modules
+  - File: `src/ace/policy_config.py`
+
+### Changed
+
+- **Installation**: Base `pip install acha-code-health` now includes all ACE command-line tool dependencies
+- **Documentation**: Updated README.md installation instructions to reflect new dependency structure
+
+### Testing
+
+- Verified RepoMap determinism: consecutive index builds produce identical hashes
+- Confirmed PolicyConfig imports resolve correctly with shared constants
+- Validated all critical module imports work without optional extras
+
 ## [ACE 2.0.0] - 2025-01-12
 
 ### Added - Planner v1

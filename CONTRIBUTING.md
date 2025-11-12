@@ -6,7 +6,7 @@ Thank you for your interest in contributing to the Autonomous Code-Health Agent 
 
 ### Prerequisites
 
-- Python 3.11 or higher
+- Python 3.11 or 3.12 (see `requires-python` in `pyproject.toml`)
 - Git
 - pip
 
@@ -19,14 +19,23 @@ Thank you for your interest in contributing to the Autonomous Code-Health Agent 
    ```
 
 2. **Install in development mode:**
+
+   **Option A: Install with extras (recommended):**
    ```bash
-   pip install -e .[dev,test]
+   pip install -e .[dev,test,pro]
+   ```
+
+   **Option B: Install with pinned versions (for reproducibility):**
+   ```bash
+   pip install -r requirements-dev.txt && pip install -e .
    ```
 
 3. **Run tests to verify setup:**
    ```bash
    pytest
    ```
+
+**Note:** As of v2.1.0, all ACE command-line tool dependencies (`libcst`, `markdown-it-py`, `pyyaml`, `textual`) are included in the base installation. No need for `[ace]` extras.
 
 ## Development Workflow
 
