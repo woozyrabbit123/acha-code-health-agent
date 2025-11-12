@@ -2,59 +2,51 @@
 """ACE CLI - Autonomous Code Editor command-line interface."""
 
 import argparse
+import json
 import sys
+from pathlib import Path
 
 from ace import __version__
-from ace.export import to_json
 from ace.kernel import run_analyze, run_apply, run_refactor, run_validate
 
 
 def cmd_analyze(args):
     """Analyze code for issues across multiple languages."""
-    target = args.target
-    output_format = args.format
+    target = Path(args.target)
+    rules = args.rules.split(",") if args.rules else None
 
-    # Run analysis
-    findings = run_analyze(target)
+    findings = run_analyze(target, rules)
 
-    # Print findings in requested format
-    if output_format == "json":
-        print(to_json([f.__dict__ for f in findings]))
+    # Output as JSON
+    output = [f.to_dict() for f in findings]
+    print(json.dumps(output, indent=2, sort_keys=True))
 
     return 0
 
 
 def cmd_refactor(args):
     """Plan refactoring changes."""
-    target = args.target
-    rule = getattr(args, "rule", None)
+    target = Path(args.target)
+    rules = args.rules.split(",") if args.rules else None
 
-    # Run analysis and refactoring
-    findings = run_analyze(target)
+    plans = run_refactor(target, rules)
 
-    # Filter by rule if specified
-    if rule:
-        findings = [f for f in findings if f.rule == rule]
-
-    plans = run_refactor(target, findings)
-
-    # Print plans
-    print(to_json([p.__dict__ for p in plans]))
+    # Output as JSON
+    output = [p.to_dict() for p in plans]
+    print(json.dumps(output, indent=2, sort_keys=True))
 
     return 0
 
 
 def cmd_validate(args):
     """Validate refactored code."""
-    target = args.target
+    target = Path(args.target)
+    rules = args.rules.split(",") if args.rules else None
 
-    # Run full validation pipeline
-    findings = run_analyze(target)
-    plans = run_refactor(target, findings)
-    receipts = run_validate(target, plans)
+    receipts = run_validate(target, rules)
 
-    # Print receipts
-    print(to_json([r.__dict__ for r in receipts]))
+    # Output as JSON
+    print(json.dumps(receipts, indent=2, sort_keys=True))
 
     return 0
 
@@ -67,19 +59,17 @@ def cmd_export(args):
 
 def cmd_apply(args):
     """Apply refactoring changes with safety checks."""
-    target = args.target
+    target = Path(args.target)
+    rules = args.rules.split(",") if args.rules else None
 
-    # Run apply pipeline
-    findings = run_analyze(target)
-    plans = run_refactor(target, findings)
-    exit_code = run_apply(target, plans)
+    result = run_apply(target, rules, dry_run=not args.yes)
 
-    if exit_code == 0:
-        print("✓ Refactoring applied successfully")
+    if result == 0:
+        print("Refactoring applied successfully")
     else:
-        print("✗ Refactoring failed")
+        print("Refactoring failed")
 
-    return exit_code
+    return result
 
 
 def main():
@@ -98,23 +88,36 @@ def main():
     parser_analyze = subparsers.add_parser(
         "analyze", help="Analyze code for issues"
     )
-    parser_analyze.add_argument("--target", required=True, help="Target directory or file")
-    parser_analyze.add_argument("--format", default="json", choices=["json"], help="Output format")
+    parser_analyze.add_argument(
+        "--target", required=True, help="Target directory or file to analyze"
+    )
+    parser_analyze.add_argument(
+        "--rules", help="Comma-separated list of rule IDs to run (default: all)"
+    )
     parser_analyze.set_defaults(func=cmd_analyze)
 
     # refactor subcommand
     parser_refactor = subparsers.add_parser(
         "refactor", help="Plan refactoring changes"
     )
-    parser_refactor.add_argument("--target", required=True, help="Target directory or file")
-    parser_refactor.add_argument("--rule", help="Filter by specific rule (e.g., py-s101)")
+    parser_refactor.add_argument(
+        "--target", required=True, help="Target directory or file to refactor"
+    )
+    parser_refactor.add_argument(
+        "--rules", help="Comma-separated list of rule IDs to apply (default: all)"
+    )
     parser_refactor.set_defaults(func=cmd_refactor)
 
     # validate subcommand
     parser_validate = subparsers.add_parser(
         "validate", help="Validate refactored code"
     )
-    parser_validate.add_argument("--target", required=True, help="Target directory or file")
+    parser_validate.add_argument(
+        "--target", required=True, help="Target directory or file to validate"
+    )
+    parser_validate.add_argument(
+        "--rules", help="Comma-separated list of rule IDs to validate (default: all)"
+    )
     parser_validate.set_defaults(func=cmd_validate)
 
     # export subcommand
@@ -127,8 +130,15 @@ def main():
     parser_apply = subparsers.add_parser(
         "apply", help="Apply refactoring changes"
     )
-    parser_apply.add_argument("--target", required=True, help="Target directory or file")
-    parser_apply.add_argument("--yes", action="store_true", help="Skip confirmation")
+    parser_apply.add_argument(
+        "--target", required=True, help="Target directory or file to apply changes to"
+    )
+    parser_apply.add_argument(
+        "--rules", help="Comma-separated list of rule IDs to apply (default: all)"
+    )
+    parser_apply.add_argument(
+        "--yes", action="store_true", help="Apply changes without confirmation"
+    )
     parser_apply.set_defaults(func=cmd_apply)
 
     args = parser.parse_args()

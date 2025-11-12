@@ -71,8 +71,9 @@ class TestHttpTimeoutRule:
 
         # Check plan details
         assert plan.estimated_risk >= 0.75
-        assert plan.rule == "PY-S101-UNSAFE-HTTP"
-        assert "2 requests call" in plan.description
+        assert len(plan.findings) == 2
+        assert plan.findings[0].rule == "PY-S101-UNSAFE-HTTP"
+        assert len(plan.edits) == 1
 
     def test_refactor_preserves_existing_timeout(self):
         """Test that refactor doesn't add timeout if already present."""
@@ -91,16 +92,18 @@ class TestHttpTimeoutRule:
 
             # Run validation
             findings = run_analyze(str(test_file))
-            plans = run_refactor(str(test_file), findings)
-            receipts = run_validate(str(test_file), plans)
+            assert len(findings) == 2
 
+            plans = run_refactor(str(test_file))
+            assert len(plans) == 1
+
+            receipts = run_validate(str(test_file))
             assert len(receipts) == 1
 
             receipt = receipts[0]
-            assert receipt.status == "pass"
-            assert receipt.decision == "auto"  # High R* score should give AUTO
-            assert receipt.parse_valid is True
-            assert receipt.before_hash != receipt.after_hash
+            assert receipt["parse_valid"] is True
+            assert receipt["invariants_met"] is True
+            assert receipt["before_hash"] != receipt["after_hash"]
 
     def test_apply_writes_changes(self):
         """Test that apply successfully writes changes to file."""
@@ -111,8 +114,9 @@ class TestHttpTimeoutRule:
 
             # Run apply
             findings = run_analyze(str(test_file))
-            plans = run_refactor(str(test_file), findings)
-            exit_code = run_apply(str(test_file), plans)
+            assert len(findings) == 2
+
+            exit_code = run_apply(Path(test_file))
 
             assert exit_code == 0
 
@@ -130,18 +134,16 @@ class TestHttpTimeoutRule:
 
             # First apply
             findings1 = run_analyze(str(test_file))
-            plans1 = run_refactor(str(test_file), findings1)
-            run_apply(str(test_file), plans1)
+            assert len(findings1) == 2
 
+            run_apply(Path(test_file))
             content_after_first = test_file.read_text(encoding="utf-8")
 
             # Second apply
             findings2 = run_analyze(str(test_file))
             assert len(findings2) == 0, "Should find no issues after first fix"
 
-            plans2 = run_refactor(str(test_file), findings2)
-            run_apply(str(test_file), plans2)
-
+            run_apply(Path(test_file))
             content_after_second = test_file.read_text(encoding="utf-8")
 
             # Content should be identical
@@ -151,10 +153,10 @@ class TestHttpTimeoutRule:
         """Test that running analyze/refactor twice produces identical JSON."""
         # Run analysis twice
         findings1 = analyze_py(SAMPLE_CODE_WITH_ISSUE, "api.py")
-        json1 = to_json([f.__dict__ for f in findings1])
+        json1 = to_json([f.to_dict() for f in findings1])
 
         findings2 = analyze_py(SAMPLE_CODE_WITH_ISSUE, "api.py")
-        json2 = to_json([f.__dict__ for f in findings2])
+        json2 = to_json([f.to_dict() for f in findings2])
 
         # JSON should be byte-identical
         assert json1 == json2
@@ -173,7 +175,7 @@ class TestHttpTimeoutRule:
 
             # Run ace analyze via CLI
             result = subprocess.run(
-                [sys.executable, "-m", "ace.cli", "analyze", "--target", str(tmpdir), "--format", "json"],
+                [sys.executable, "-m", "ace.cli", "analyze", "--target", str(tmpdir)],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -197,19 +199,19 @@ class TestHttpTimeoutRule:
             assert all(f.severity == "high" for f in findings)
 
             # Step 2: Refactor
-            plans = run_refactor(str(test_file), findings)
+            plans = run_refactor(Path(test_file))
             assert len(plans) == 1
             assert plans[0].estimated_risk >= 0.75
 
             # Step 3: Validate
-            receipts = run_validate(str(test_file), plans)
+            receipts = run_validate(Path(test_file))
             assert len(receipts) == 1
-            assert receipts[0].status == "pass"
-            assert receipts[0].decision == "auto"
-            assert receipts[0].before_hash != receipts[0].after_hash
+            assert receipts[0]["parse_valid"] is True
+            assert receipts[0]["invariants_met"] is True
+            assert receipts[0]["before_hash"] != receipts[0]["after_hash"]
 
             # Step 4: Apply
-            exit_code = run_apply(str(test_file), plans)
+            exit_code = run_apply(Path(test_file))
             assert exit_code == 0
 
             # Step 5: Verify result
