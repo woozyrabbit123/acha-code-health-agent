@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acha.dev/schemas/v1/index.json",
+  "title": "ACE v1 Schema Index",
+  "description": "Index of all ACE v1 JSON Schemas",
+  "type": "object",
+  "properties": {
+    "version": {
+      "const": "1.0.0"
+    },
+    "schemas": {
+      "type": "object",
+      "properties": {
+        "unified_issue": {
+          "$ref": "unified_issue.schema.json"
+        },
+        "edit": {
+          "$ref": "edit.schema.json"
+        },
+        "edit_plan": {
+          "$ref": "edit_plan.schema.json"
+        },
+        "receipt": {
+          "$ref": "receipt.schema.json"
+        }
+      }
+    }
+  },
+  "required": ["version", "schemas"]
+}
