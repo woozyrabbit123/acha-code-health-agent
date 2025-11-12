@@ -726,6 +726,30 @@ def cmd_tune(args):
         return ExitCode.OPERATIONAL_ERROR
 
 
+def cmd_repair(args):
+    """Show repair report for partial edit failures."""
+    try:
+        from ace.explain import explain_repair
+        from ace.repair import read_latest_repair_report
+
+        if args.repair_command == "show" or getattr(args, "latest", False):
+            # Show latest repair report
+            report = read_latest_repair_report()
+
+            if not report:
+                print("No repair reports found. Run autopilot to generate repairs.")
+                return ExitCode.SUCCESS
+
+            # Print detailed explanation
+            print(explain_repair(report))
+
+        return ExitCode.SUCCESS
+
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
 def cmd_learn(args):
     """Manage learning data and adaptive thresholds."""
     try:
@@ -1304,6 +1328,23 @@ def main():
             "tune", help="Show performance tuning recommendations"
         )
         parser_tune.set_defaults(func=cmd_tune)
+
+        # repair subcommand
+        parser_repair = subparsers.add_parser(
+            "repair", help="Show repair reports for partial edit failures"
+        )
+        repair_subparsers = parser_repair.add_subparsers(
+            dest="repair_command", help="Repair commands"
+        )
+
+        # repair show (or --latest)
+        parser_repair_show = repair_subparsers.add_parser(
+            "show", help="Show latest repair report"
+        )
+        parser_repair_show.add_argument(
+            "--latest", action="store_true", help="Show latest repair report (default)"
+        )
+        parser_repair_show.set_defaults(func=cmd_repair, latest=True)
 
         # learn subcommands
         parser_learn = subparsers.add_parser(
