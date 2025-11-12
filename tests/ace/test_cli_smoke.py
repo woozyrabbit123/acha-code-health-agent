@@ -46,14 +46,14 @@ def test_analyze_stub():
     """Test that ace analyze works with empty directory."""
     with tempfile.TemporaryDirectory() as tmpdir:
         result = subprocess.run(
-            [sys.executable, "-m", "ace.cli", "analyze", "--target", tmpdir, "--format", "json"],
+            [sys.executable, "-m", "ace.cli", "analyze", "--target", tmpdir],
             capture_output=True,
             text=True,
             check=False,
         )
 
         assert result.returncode == 0, f"Expected exit 0, got {result.returncode}"
-        # Should return empty JSON array for empty directory
+        # Empty directory should return empty JSON array
         assert result.stdout.strip() == "[]"
 
 
@@ -68,7 +68,7 @@ def test_refactor_stub():
         )
 
         assert result.returncode == 0, f"Expected exit 0, got {result.returncode}"
-        # Should return empty JSON array for empty directory
+        # Empty directory should return empty JSON array
         assert result.stdout.strip() == "[]"
 
 
@@ -83,7 +83,7 @@ def test_validate_stub():
         )
 
         assert result.returncode == 0, f"Expected exit 0, got {result.returncode}"
-        # Should return empty JSON array for empty directory
+        # Empty directory should return empty JSON array
         assert result.stdout.strip() == "[]"
 
 
@@ -111,5 +111,5 @@ def test_apply_stub():
         )
 
         assert result.returncode == 0, f"Expected exit 0, got {result.returncode}"
-        # Should print success message for empty directory (no changes to apply)
+        # Empty directory should print success message
         assert "Refactoring applied successfully" in result.stdout
