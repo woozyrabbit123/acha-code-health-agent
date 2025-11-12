@@ -10,6 +10,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from ace.safety import atomic_write
+
 
 @dataclass
 class FileEntry:
@@ -57,10 +59,7 @@ class ContentIndex:
             self.entries = {}
 
     def save(self) -> None:
-        """Save index to disk with deterministic serialization."""
-        # Ensure parent directory exists
-        self.index_path.parent.mkdir(parents=True, exist_ok=True)
-
+        """Save index to disk with deterministic serialization and atomic write."""
         # Convert to dict for JSON serialization
         data = {}
         for path_str, entry in sorted(self.entries.items()):
@@ -72,10 +71,10 @@ class ContentIndex:
                 "clean_runs_count": entry.clean_runs_count
             }
 
-        # Write with deterministic formatting
-        with open(self.index_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, sort_keys=True)
-            f.write("\n")  # Trailing newline
+        # Write with deterministic formatting and atomic write for durability
+        content = json.dumps(data, indent=2, sort_keys=True).encode('utf-8')
+        content += b"\n"  # Trailing newline
+        atomic_write(self.index_path, content)
 
     def add_file(self, file_path: Path, preserve_clean_runs: bool = False) -> FileEntry:
         """

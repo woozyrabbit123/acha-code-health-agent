@@ -26,6 +26,10 @@ classifiers = [
 
 dependencies = [
     "jsonschema>=4.0.0",
+    "libcst>=1.5.0",
+    "markdown-it-py>=3.0.0",
+    "pyyaml>=6.0.1",
+    "textual>=0.45.0",
 ]
 
 [project.optional-dependencies]
@@ -33,10 +37,7 @@ pro = [
     "PyNaCl>=1.6.0",
 ]
 ace = [
-    "libcst>=1.5.0",
-    "markdown-it-py>=3.0.0",
-    "pyyaml>=6.0.1",
-    "textual>=0.45.0",
+    # Core ACE dependencies now in base dependencies above
 ]
 test = [
     "pytest>=7.0",

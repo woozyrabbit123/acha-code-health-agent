@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ace.safety import atomic_write
 from ace.skills.python import EditPlan
 from ace.uir import UnifiedIssue
 
@@ -91,19 +92,13 @@ class Skiplist:
             self.entries = {}
 
     def save(self) -> None:
-        """Save skiplist to disk."""
-        # Ensure directory exists
-        self.skiplist_path.parent.mkdir(parents=True, exist_ok=True)
-
+        """Save skiplist to disk with atomic write for durability."""
         # Serialize entries
         data = {key: entry.to_dict() for key, entry in self.entries.items()}
 
-        # Write atomically
-        tmp_path = self.skiplist_path.with_suffix(".json.tmp")
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, sort_keys=True)
-
-        tmp_path.replace(self.skiplist_path)
+        # Write atomically with fsync for durability
+        content = json.dumps(data, indent=2, sort_keys=True).encode('utf-8')
+        atomic_write(self.skiplist_path, content)
 
     def compute_key(
         self,
