@@ -24,6 +24,7 @@ class Receipt:
         estimated_risk: Risk estimate from the EditPlan [0.0, 1.0]
         duration_ms: Time taken to apply the transformation in milliseconds
         timestamp: ISO 8601 timestamp of when transformation was applied
+        policy_hash: Hash of policy configuration used (optional, v0.7+)
     """
 
     plan_id: str
@@ -35,10 +36,11 @@ class Receipt:
     estimated_risk: float
     duration_ms: int
     timestamp: str
+    policy_hash: str = ""
 
     def to_dict(self) -> dict:
         """Convert receipt to dictionary for JSON serialization."""
-        return {
+        result = {
             "plan_id": self.plan_id,
             "file": self.file,
             "before_hash": self.before_hash,
@@ -49,6 +51,10 @@ class Receipt:
             "duration_ms": self.duration_ms,
             "timestamp": self.timestamp,
         }
+        # Only include policy_hash if present (v0.7+)
+        if self.policy_hash:
+            result["policy_hash"] = self.policy_hash
+        return result
 
     @staticmethod
     def from_dict(data: dict) -> "Receipt":
@@ -63,6 +69,7 @@ class Receipt:
             estimated_risk=data["estimated_risk"],
             duration_ms=data["duration_ms"],
             timestamp=data["timestamp"],
+            policy_hash=data.get("policy_hash", ""),
         )
 
 
@@ -75,6 +82,7 @@ def create_receipt(
     invariants_met: bool,
     estimated_risk: float,
     duration_ms: int,
+    policy_hash: str = "",
 ) -> Receipt:
     """
     Create a receipt for an applied refactoring.
@@ -88,6 +96,7 @@ def create_receipt(
         invariants_met: Whether all invariants were satisfied
         estimated_risk: Risk estimate [0.0, 1.0]
         duration_ms: Duration of transformation in milliseconds
+        policy_hash: Hash of policy configuration (optional, v0.7+)
 
     Returns:
         Receipt object with all fields populated
@@ -129,6 +138,7 @@ def create_receipt(
         estimated_risk=estimated_risk,
         duration_ms=duration_ms,
         timestamp=timestamp,
+        policy_hash=policy_hash,
     )
 
 

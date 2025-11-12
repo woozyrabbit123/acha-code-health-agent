@@ -144,6 +144,54 @@ def decision(
         return Decision.SKIP
 
 
+def rstar_pack(
+    severity: float,
+    complexity: float,
+    cohesion: float,
+    alpha: float = DEFAULT_ALPHA,
+    beta: float = DEFAULT_BETA,
+    gamma: float = 0.2,
+) -> float:
+    """
+    Calculate R* for a pack with cohesion boost.
+
+    R* = α × severity + β × complexity + γ × cohesion
+
+    For packs, we boost the score based on cohesion (how many related rules
+    are being fixed together). This incentivizes fixing related issues together.
+
+    Args:
+        severity: Maximum severity score across pack findings (0.0 to 1.0)
+        complexity: Maximum complexity score across pack findings (0.0 to 1.0)
+        cohesion: Pack cohesion score (0.0 to 1.0)
+        alpha: Weight for severity (default: 0.7)
+        beta: Weight for complexity (default: 0.3)
+        gamma: Weight for cohesion boost (default: 0.2)
+
+    Returns:
+        R* score (0.0 to 1.0+, capped at 1.0)
+
+    Examples:
+        >>> rstar_pack(0.9, 0.8, 1.0)  # High severity, high complexity, perfect cohesion
+        0.97
+        >>> rstar_pack(0.5, 0.3, 0.6)  # Medium severity, low complexity, good cohesion
+        0.56
+    """
+    # Validate inputs
+    severity = max(0.0, min(1.0, severity))
+    complexity = max(0.0, min(1.0, complexity))
+    cohesion = max(0.0, min(1.0, cohesion))
+
+    # Base R* score
+    base_score = alpha * severity + beta * complexity
+
+    # Add cohesion boost
+    boosted_score = base_score + gamma * cohesion
+
+    # Cap at 1.0
+    return max(0.0, min(1.0, boosted_score))
+
+
 def enforce_policy(findings: list, policy_config: dict) -> tuple[bool, list[str]]:
     """
     Enforce policy on findings.

@@ -1,0 +1,119 @@
+# ACE Policy Configuration v0.7
+# Policy-as-Data: Define risk management and rule policies
+
+[meta]
+# Policy metadata
+version = "0.7.0"
+description = "ACE default policy configuration"
+
+[scoring]
+# R* calculation weights
+alpha = 0.7  # Weight for severity (0.0 to 1.0)
+beta = 0.3   # Weight for complexity (0.0 to 1.0)
+gamma = 0.2  # Weight for pack cohesion boost (0.0 to 1.0)
+
+# Decision thresholds
+auto_threshold = 0.70     # Auto-apply if R* >= 0.70
+suggest_threshold = 0.50  # Suggest if R* >= 0.50
+
+[limits]
+# Quality gates
+max_findings = 0           # Maximum allowed findings (0 = unlimited)
+fail_on_critical = true    # Fail if any critical severity findings
+warn_at = 50               # Warning threshold for finding count
+fail_at = 100              # Failure threshold for finding count
+
+[modes]
+# Rule-specific modes
+# Options: "auto-fix" (default), "detect-only"
+
+# Security rules - auto-fix by default
+"PY-S101-UNSAFE-HTTP" = "auto-fix"
+"PY-S201-SUBPROCESS-CHECK" = "auto-fix"
+"PY-S202-SUBPROCESS-SHELL" = "auto-fix"
+"PY-S203-SUBPROCESS-STRING-CMD" = "detect-only"  # Too risky to auto-fix
+
+# Exception handling - auto-fix
+"PY-E201-BROAD-EXCEPT" = "auto-fix"
+
+# Code quality - detect-only by default (needs human judgment)
+"PY-Q201-ASSERT-IN-NONTEST" = "detect-only"
+"PY-Q202-PRINT-IN-SRC" = "detect-only"
+"PY-Q203-EVAL-EXEC" = "detect-only"
+
+# Style rules - auto-fix
+"PY-S310-TRAILING-WS" = "auto-fix"
+"PY-S311-EOF-NL" = "auto-fix"
+"PY-S312-BLANKLINES" = "auto-fix"
+
+# Import sorting - auto-fix
+"PY-I101-IMPORT-SORT" = "auto-fix"
+
+# Markdown - detect-only
+"MD-S001-DANGEROUS-COMMAND" = "detect-only"
+
+# YAML - detect-only
+"YML-F001-DUPLICATE-KEY" = "detect-only"
+
+# Shell - detect-only (shell changes are risky)
+"SH-S001-MISSING-STRICT-MODE" = "detect-only"
+
+[risk_classes]
+# Map rules to risk classes for reporting
+# Risk classes: "security", "reliability", "maintainability", "style"
+
+security = [
+    "PY-S101-UNSAFE-HTTP",
+    "PY-S201-SUBPROCESS-CHECK",
+    "PY-S202-SUBPROCESS-SHELL",
+    "PY-S203-SUBPROCESS-STRING-CMD",
+    "MD-S001-DANGEROUS-COMMAND",
+    "SH-S001-MISSING-STRICT-MODE",
+]
+
+reliability = [
+    "PY-E201-BROAD-EXCEPT",
+    "PY-Q201-ASSERT-IN-NONTEST",
+    "YML-F001-DUPLICATE-KEY",
+]
+
+maintainability = [
+    "PY-I101-IMPORT-SORT",
+    "PY-Q202-PRINT-IN-SRC",
+    "PY-Q203-EVAL-EXEC",
+]
+
+style = [
+    "PY-S310-TRAILING-WS",
+    "PY-S311-EOF-NL",
+    "PY-S312-BLANKLINES",
+]
+
+[suppressions]
+# Path-based suppressions (glob patterns)
+# Useful for excluding test files, generated code, etc.
+
+paths = [
+    "tests/**",           # Don't auto-fix test files
+    "**/test_*.py",       # Don't auto-fix test files
+    "**/.venv/**",        # Ignore virtual environments
+    "**/dist/**",         # Ignore distribution files
+    "**/build/**",        # Ignore build artifacts
+    "**/__pycache__/**",  # Ignore Python cache
+]
+
+# Rule-specific path suppressions
+[suppressions.rules]
+"PY-Q202-PRINT-IN-SRC" = [
+    "scripts/**",         # Allow print() in scripts
+    "tools/**",           # Allow print() in tools
+]
+"PY-Q201-ASSERT-IN-NONTEST" = [
+    "scripts/**",         # Allow assert in scripts
+]
+
+[packs]
+# Pack configuration
+enabled = true          # Enable macro-fix packs
+min_findings = 2        # Minimum findings to form a pack
+prefer_packs = true     # Prefer pack plans over individual plans
