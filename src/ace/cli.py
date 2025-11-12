@@ -321,6 +321,11 @@ def cmd_revert(args):
         # Initialize skiplist for auto-learning
         skiplist = Skiplist()
 
+        # Initialize learning engine
+        from ace.learn import LearningEngine
+        learning = LearningEngine()
+        learning.load()
+
         # Revert each file in reverse order
         reverted = 0
         failed = 0
@@ -369,6 +374,9 @@ def cmd_revert(args):
                         context_path=context.file,
                         reason="manual-revert"
                     )
+
+                    # Learning: Record manual revert outcome
+                    learning.record_outcome(rule_id, "reverted", context_key=None)
 
             except Exception as e:
                 print(f"  FAIL {context.file}: {e}", file=sys.stderr)
@@ -662,6 +670,63 @@ def cmd_verify(args):
     except ACEError as e:
         print(format_error(e), file=sys.stderr)
         return e.exit_code
+    except Exception as e:
+        print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
+        return ExitCode.OPERATIONAL_ERROR
+
+
+def cmd_learn(args):
+    """Manage learning data and adaptive thresholds."""
+    try:
+        from ace.learn import LearningEngine
+
+        subcommand = args.learn_command if hasattr(args, "learn_command") else None
+
+        learning = LearningEngine()
+        learning.load()
+
+        if subcommand == "show":
+            # Show top rules by revert rate and threshold adjustments
+            print("ACE Learning Statistics\n" + "=" * 60)
+
+            top_rules = learning.get_top_rules_by_revert_rate(limit=10)
+
+            if not top_rules:
+                print("No learning data yet. Run autopilot to start learning.")
+                return ExitCode.SUCCESS
+
+            print(f"\nTop {len(top_rules)} rules by revert rate:\n")
+            print(f"{'Rule ID':<35} {'Applied':<10} {'Reverted':<10} {'Rate':<8} {'Threshold Adj':<15}")
+            print("-" * 90)
+
+            for rule_id, stats, revert_rate in top_rules:
+                tuned_auto, tuned_suggest = learning.tuned_thresholds(rule_id)
+
+                # Check if threshold was adjusted
+                from ace.learn import DEFAULT_MIN_AUTO
+                if tuned_auto != DEFAULT_MIN_AUTO:
+                    adj = f"+{(tuned_auto - DEFAULT_MIN_AUTO):.2f}" if tuned_auto > DEFAULT_MIN_AUTO else f"{(tuned_auto - DEFAULT_MIN_AUTO):.2f}"
+                    threshold_info = f"auto: {tuned_auto:.2f} ({adj})"
+                else:
+                    threshold_info = "default"
+
+                print(f"{rule_id:<35} {stats.applied:<10} {stats.reverted:<10} {revert_rate*100:>6.1f}% {threshold_info:<15}")
+
+            print(f"\n{'Total rules tracked':<30}: {len(learning.data.rules)}")
+            print(f"{'Total contexts tracked':<30}: {len(learning.data.contexts)}")
+
+            return ExitCode.SUCCESS
+
+        elif subcommand == "reset":
+            # Reset learning data
+            learning.reset()
+            print("✓ Learning data reset")
+            return ExitCode.SUCCESS
+
+        else:
+            print("Usage: ace learn [show|reset]")
+            return ExitCode.INVALID_ARGS
+
     except Exception as e:
         print(format_error(e, verbose=getattr(args, "verbose", False)), file=sys.stderr)
         return ExitCode.OPERATIONAL_ERROR
@@ -1176,6 +1241,26 @@ def main():
             "show", help="Show current rules version"
         )
         parser_rules_show.set_defaults(func=cmd_rules)
+
+        # learn subcommands
+        parser_learn = subparsers.add_parser(
+            "learn", help="Manage learning data and adaptive thresholds"
+        )
+        learn_subparsers = parser_learn.add_subparsers(
+            dest="learn_command", help="Learn commands"
+        )
+
+        # learn show
+        parser_learn_show = learn_subparsers.add_parser(
+            "show", help="Show learning statistics and threshold adjustments"
+        )
+        parser_learn_show.set_defaults(func=cmd_learn)
+
+        # learn reset
+        parser_learn_reset = learn_subparsers.add_parser(
+            "reset", help="Reset all learning data"
+        )
+        parser_learn_reset.set_defaults(func=cmd_learn)
 
         args = parser.parse_args()
 

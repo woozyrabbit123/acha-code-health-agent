@@ -20,6 +20,7 @@ from ace.perf import get_profiler
 from ace.receipts import Receipt, create_receipt
 from ace.safety import atomic_write, content_hash, is_idempotent, parse_after_edit_ok
 from ace.skiplist import Skiplist, add_plan_to_skiplist
+from ace.learn import LearningEngine, context_key, get_rule_ids_from_plan
 from ace.skills.config import analyze_yaml_duplicate_keys
 from ace.skills.markdown import analyze_markdown_dangerous_commands
 from ace.skills.python import (
@@ -499,6 +500,10 @@ def run_apply(
     # Initialize skiplist for auto-learning
     skiplist = Skiplist()
 
+    # Initialize learning engine
+    learning = LearningEngine()
+    learning.load()
+
     modified_files = []
     receipts = []
 
@@ -610,6 +615,11 @@ def run_apply(
                     # Auto-learn: Add to skiplist to avoid repeating this fix
                     add_plan_to_skiplist(plan, skiplist, reason="auto-revert:guard-fail")
 
+                    # Learning: Record revert outcome
+                    ctx_key = context_key(plan)
+                    for rule_id in get_rule_ids_from_plan(plan):
+                        learning.record_outcome(rule_id, "reverted", ctx_key)
+
             elif not dry_run:
                 # For non-Python files, just check parse (legacy behavior)
                 parse_valid = parse_after_edit_ok(file_path)
@@ -630,6 +640,11 @@ def run_apply(
 
                     # Auto-learn: Add to skiplist to avoid repeating this fix
                     add_plan_to_skiplist(plan, skiplist, reason="auto-revert:parse-fail")
+
+                    # Learning: Record revert outcome
+                    ctx_key = context_key(plan)
+                    for rule_id in get_rule_ids_from_plan(plan):
+                        learning.record_outcome(rule_id, "reverted", ctx_key)
 
             # Calculate duration
             end_time = time.perf_counter()
@@ -671,6 +686,11 @@ def run_apply(
                     after_size=len(after_content_bytes),
                     receipt_id=receipt.plan_id
                 )
+
+                # Learning: Record successful application
+                ctx_key = context_key(plan)
+                for rule_id in get_rule_ids_from_plan(plan):
+                    learning.record_outcome(rule_id, "applied", ctx_key)
 
         except Exception as e:
             # Skip files that can't be written, but continue with others
