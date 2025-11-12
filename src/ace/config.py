@@ -99,7 +99,16 @@ def load_toml_config(config_path: Path) -> dict[str, Any]:
 
     Returns:
         Parsed TOML configuration
+
+    Raises:
+        ImportError: If TOML support is not available
     """
+    if tomllib is None:
+        raise ImportError(
+            "TOML support requires Python 3.11+ or 'tomli' package. "
+            "Install with: pip install tomli"
+        )
+
     with open(config_path, "rb") as f:
         return tomllib.load(f)
 

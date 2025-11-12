@@ -51,6 +51,8 @@ def analyze_dockerfile(file_path: Path | str, content: str) -> list[UnifiedIssue
 
         # Check for FROM with :latest
         if line_stripped.upper().startswith("FROM "):
+            # Reset USER tracking for each new FROM (multi-stage builds)
+            has_user_instruction = False
             from_instructions.append((line_num, line_stripped))
             if ":latest" in line_stripped.lower() or (
                 ":" not in line_stripped and "as " not in line_stripped.lower()

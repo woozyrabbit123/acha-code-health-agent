@@ -46,7 +46,7 @@ class TestVerifyASTEquivalence:
         assert not equiv
 
 
-class TestVerifyCST Roundtrip:
+class TestVerifyCSTRoundtrip:
     """Tests for CST roundtrip verification."""
 
     def test_valid_roundtrip(self):
