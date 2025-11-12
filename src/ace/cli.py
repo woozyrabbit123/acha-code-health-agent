@@ -119,16 +119,36 @@ def cmd_apply(args):
 
         rules = args.rules.split(",") if args.rules else None
 
-        result = run_apply(target, rules, dry_run=not args.yes)
+        exit_code, receipts = run_apply(
+            target,
+            rules,
+            dry_run=not args.yes,
+            force=args.force,
+            stash=args.stash,
+            commit=args.commit,
+        )
 
-        if result == ExitCode.SUCCESS:
+        # Write receipts if any were generated
+        if receipts:
+            receipts_path = Path("receipts.json")
+            import json
+            with open(receipts_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    [r.to_dict() for r in receipts],
+                    f,
+                    indent=2,
+                    sort_keys=True,
+                )
+            print(f"Generated {len(receipts)} receipt(s) → {receipts_path}")
+
+        if exit_code == ExitCode.SUCCESS:
             print("Refactoring applied successfully")
-        elif result == ExitCode.POLICY_DENY:
+        elif exit_code == ExitCode.POLICY_DENY:
             raise PolicyDenyError("Refactoring blocked by policy (dirty git tree or high risk)")
         else:
             raise OperationalError("Refactoring failed")
 
-        return result
+        return exit_code
 
     except ACEError as e:
         print(format_error(e), file=sys.stderr)
@@ -208,6 +228,15 @@ def main():
         )
         parser_apply.add_argument(
             "--yes", action="store_true", help="Apply changes without confirmation"
+        )
+        parser_apply.add_argument(
+            "--force", action="store_true", help="Skip git safety checks (allows dirty tree)"
+        )
+        parser_apply.add_argument(
+            "--stash", action="store_true", help="Stash git changes before applying"
+        )
+        parser_apply.add_argument(
+            "--commit", action="store_true", help="Commit changes after applying"
         )
         parser_apply.set_defaults(func=cmd_apply)
 

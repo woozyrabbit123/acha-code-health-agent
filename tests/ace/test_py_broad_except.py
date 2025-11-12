@@ -83,7 +83,7 @@ def another_function():
             test_file.write_text(code)
 
             # Apply the refactoring
-            result = run_apply(Path(tmpdir), dry_run=False)
+            result, _ = run_apply(Path(tmpdir), dry_run=False)
             assert result == 0
 
             # Read the modified file
@@ -107,13 +107,13 @@ def another_function():
             test_file.write_text(code)
 
             # Apply once
-            result1 = run_apply(Path(tmpdir), dry_run=False)
+            result1, _ = run_apply(Path(tmpdir), dry_run=False)
             assert result1 == 0
 
             first_content = test_file.read_text()
 
             # Apply again
-            result2 = run_apply(Path(tmpdir), dry_run=False)
+            result2, _ = run_apply(Path(tmpdir), dry_run=False)
             assert result2 == 0
 
             second_content = test_file.read_text()

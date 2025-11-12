@@ -116,7 +116,7 @@ class TestHttpTimeoutRule:
             findings = run_analyze(str(test_file))
             assert len(findings) == 2
 
-            exit_code = run_apply(Path(test_file))
+            exit_code, _ = run_apply(Path(test_file))
 
             assert exit_code == 0
 
@@ -211,7 +211,7 @@ class TestHttpTimeoutRule:
             assert receipts[0]["before_hash"] != receipts[0]["after_hash"]
 
             # Step 4: Apply
-            exit_code = run_apply(Path(test_file))
+            exit_code, _ = run_apply(Path(test_file))
             assert exit_code == 0
 
             # Step 5: Verify result
