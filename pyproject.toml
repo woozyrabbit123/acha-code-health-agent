@@ -32,6 +32,11 @@ dependencies = [
 pro = [
     "PyNaCl>=1.5.0",
 ]
+ace = [
+    "libcst>=1.4.0",
+    "markdown-it-py>=3.0.0",
+    "pyyaml>=6.0.1",
+]
 test = [
     "pytest>=7.0",
     "pytest-timeout>=2.0",
@@ -43,7 +48,7 @@ dev = [
     "mypy>=1.0",
 ]
 all = [
-    "acha-code-health[test,dev,pro]",
+    "acha-code-health[test,dev,pro,ace]",
 ]
 
 [project.urls]
@@ -54,6 +59,7 @@ Changelog = "https://github.com/woozyrabbit123/acha-code-health-agent/blob/main/
 
 [project.scripts]
 acha = "acha.cli:main"
+ace = "ace.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -61,7 +67,7 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["acha*"]
+include = ["acha*", "ace*"]
 
 [tool.setuptools.package-data]
 acha = [
@@ -80,7 +86,7 @@ addopts = [
 ]
 
 [tool.coverage.run]
-source = ["src/acha"]
+source = ["src/acha", "src/ace"]
 omit = [
     "tests/*",
     "sample_project/*",
