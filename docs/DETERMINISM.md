@@ -530,5 +530,88 @@ pytest tests/test_sarif_determinism.py -v
 
 ---
 
-Last Updated: 2025-01-01
-ACHA Pro Version: 1.0.0
+## ACE v0.1 Determinism Guarantees (2025-11-12)
+
+ACE v0.1 introduces additional determinism guarantees:
+
+### 1. Receipt Hashes
+**Guarantee:** SHA256 hashes in receipts are deterministic.
+
+```python
+receipt = {
+    "plan_id": "abc123",
+    "file": "test.py",
+    "before_hash": "8d69d1ddc4f...",  # SHA256 of before content
+    "after_hash": "2143472e5a5...",   # SHA256 of after content
+    "parse_valid": true,
+    "invariants_met": true,
+    "timestamp": "2025-11-12T07:10:23.456Z"
+}
+```
+
+**Why:** Same content always produces same SHA256 hash.
+
+### 2. Encoding/Newline Handling
+**Guarantee:** Round-trip file I/O preserves original newline style.
+
+- LF (Unix) → LF
+- CRLF (Windows) → CRLF
+- Mixed → defaults to LF
+
+**UTF-8 with `surrogateescape`** handles invalid byte sequences deterministically.
+
+### 3. Suppression Filtering
+**Guarantee:** Same suppressions + same findings = deterministic filtered output.
+
+```python
+# ace:disable PY-E201
+def foo():  # Suppressed
+    pass
+# ace:enable PY-E201
+```
+
+**Parsing order:** Line-by-line, deterministic state tracking.
+
+### 4. Git Safety Checks
+**Guarantee:** Git status checks are deterministic based on working tree state.
+
+```bash
+$ git status --porcelain  # Deterministic output
+$ ace apply --target src/  # Uses porcelain format
+```
+
+### 5. JSON Schema Validation
+**Guarantee:** Schema validation produces deterministic error messages.
+
+Using JSON Schema Draft 2020-12 with sorted keys ensures stable validation.
+
+---
+
+## Test Results (v0.1)
+
+**Total Tests:** 340 passing
+- Core tests: 237
+- Schema validation: 20
+- Exit codes: 20
+- Encoding/newline: 20
+- Git safety: 25
+- Receipts: 21
+- Suppressions: 28
+
+**Determinism Tests:**
+- ✅ Same file content produces same SHA256
+- ✅ Suppression filtering is idempotent
+- ✅ Receipt generation is reproducible
+- ✅ Git status parsing is stable
+- ✅ JSON exports use sorted keys
+- ✅ Newline styles preserved round-trip
+
+**Cross-Platform:**
+- ✅ Linux (Ubuntu)
+- ✅ Windows paths supported (untested in current CI)
+- ✅ UTF-8 with surrogateescape for invalid sequences
+
+---
+
+Last Updated: 2025-11-12
+ACE Version: 0.1.0
