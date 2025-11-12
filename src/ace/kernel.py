@@ -18,9 +18,13 @@ from ace.skills.python import (
     analyze_broad_except,
     analyze_import_sort,
     analyze_py,
+    analyze_subprocess_check,
+    analyze_subprocess_shell,
+    analyze_subprocess_string_cmd,
     refactor_broad_except,
     refactor_import_sort,
     refactor_py_timeout,
+    refactor_subprocess_check,
     validate_python_syntax,
 )
 from ace.skills.shell import analyze_shell_strict_mode
@@ -69,6 +73,9 @@ def run_analyze(
         "PY-S101-UNSAFE-HTTP",
         "PY-E201-BROAD-EXCEPT",
         "PY-I101-IMPORT-SORT",
+        "PY-S201-SUBPROCESS-CHECK",
+        "PY-S202-SUBPROCESS-SHELL",
+        "PY-S203-SUBPROCESS-STRING-CMD",
         "MD-S001-DANGEROUS-COMMAND",
         "YML-F001-DUPLICATE-KEY",
         "SH-S001-MISSING-STRICT-MODE",
@@ -114,6 +121,12 @@ def run_analyze(
                     file_findings.extend(analyze_broad_except(content, path_str))
                 if should_run_rule("PY-I101-IMPORT-SORT"):
                     file_findings.extend(analyze_import_sort(content, path_str))
+                if should_run_rule("PY-S201-SUBPROCESS-CHECK"):
+                    file_findings.extend(analyze_subprocess_check(content, path_str))
+                if should_run_rule("PY-S202-SUBPROCESS-SHELL"):
+                    file_findings.extend(analyze_subprocess_shell(content, path_str))
+                if should_run_rule("PY-S203-SUBPROCESS-STRING-CMD"):
+                    file_findings.extend(analyze_subprocess_string_cmd(content, path_str))
 
             # Markdown rules
             elif file_path.suffix == ".md":

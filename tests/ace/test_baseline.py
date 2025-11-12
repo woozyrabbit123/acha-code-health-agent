@@ -227,7 +227,7 @@ def test_baseline_end_to_end():
 
         # Step 3: Add a new file - compare should detect new findings
         test_file2 = Path(tmpdir) / "test2.py"
-        test_file2.write_text("import sys\n", encoding="utf-8")
+        test_file2.write_text("import subprocess\nsubprocess.run(['ls'])\n", encoding="utf-8")
 
         findings_v3 = run_analyze(tmpdir, use_cache=False)
         findings_v3_dicts = [f.to_dict() for f in findings_v3]
