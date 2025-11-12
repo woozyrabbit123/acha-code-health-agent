@@ -427,15 +427,28 @@ def auto_revert_on_guard_fail(
 
         # If journal provided, log revert
         if journal_path:
-            from ace.journal import Journal
+            from ace.journal import Journal, get_journal_id_from_path
 
-            journal = Journal(journal_path)
-            journal.log_entry({
-                "type": "guard_revert",
-                "file": guard_result.file,
-                "guard_type": guard_result.guard_type,
-                "errors": guard_result.errors,
-            })
+            # Extract run_id from journal path and get journal directory
+            run_id = get_journal_id_from_path(journal_path)
+            journal_dir = journal_path.parent
+
+            # Create journal instance with proper parameters
+            journal = Journal(run_id=run_id, journal_dir=journal_dir)
+
+            # Compute hashes for logging
+            from_sha = hashlib.sha256(guard_result.after_content.encode()).hexdigest()
+            to_sha = hashlib.sha256(guard_result.before_content.encode()).hexdigest()
+            reason = f"guard_fail:{guard_result.guard_type}:{','.join(guard_result.errors[:2])}"
+
+            # Use the correct journal API
+            journal.log_revert(
+                file=guard_result.file,
+                from_sha=from_sha,
+                to_sha=to_sha,
+                reason=reason
+            )
+            journal.close()
 
         return True
 
