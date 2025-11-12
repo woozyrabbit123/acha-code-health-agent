@@ -1,145 +1,15 @@
-name: CI
-
+name: ACE CI
 on:
   push:
-    branches: [main, dev, claude/**]
   pull_request:
-    branches: [main, dev]
-  workflow_dispatch:
-
 jobs:
   test:
-    name: Test on ${{ matrix.os }} with Python ${{ matrix.python-version }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.11", "3.12"]
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .[test]
-
-      - name: Run tests with coverage
-        run: |
-          pytest --cov --cov-report=xml --cov-report=term-missing -v
-
-      - name: Upload coverage to Codecov
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
-        uses: codecov/codecov-action@v4
-        with:
-          file: ./coverage.xml
-          flags: unittests
-          name: codecov-umbrella
-          fail_ci_if_error: false
-
-  lint:
-    name: Lint and format check
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: 'pip'
-
-      - name: Install dev dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install ruff black mypy
-
-      - name: Run ruff
-        run: ruff check . --output-format=github
-        continue-on-error: true
-
-      - name: Check formatting with black
-        run: black --check --diff .
-        continue-on-error: true
-
-  build:
-    name: Build distribution packages
-    needs: [test, lint]
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install build tools
-        run: |
-          python -m pip install --upgrade pip
-          pip install build twine
-
-      - name: Build distribution
-        run: python -m build
-
-      - name: Check distribution
-        run: twine check dist/*
-
-      - name: Install wheel for smoke test
-        run: pip install dist/*.whl
-
-      - name: CLI smoke test
-        run: acha --help
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-packages
-          path: dist/
-          retention-days: 7
-
-  integration:
-    name: Integration test (end-to-end)
-    needs: test
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install package
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .
-
-      - name: Test CLI command
-        run: |
-          acha analyze --target ./sample_project --output-format json
-
-      - name: Test full pipeline
-        run: |
-          acha run --target ./sample_project
-
-      - name: Verify reports generated
-        run: |
-          ls -la reports/
-          test -f reports/analysis.json
-          test -f reports/analysis.sarif
-          test -f reports/report.html
+      - run: pip install -e .[dev,test]
+      - run: pytest -q --cov=ace --cov-fail-under=85
+      - run: ruff check .

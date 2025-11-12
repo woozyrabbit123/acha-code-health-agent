@@ -1,5 +1,6 @@
 """ACE quick detect rules (cheap AST/regex checks)."""
 
+import logging
 import os
 from pathlib import Path
 
@@ -7,6 +8,8 @@ import libcst as cst
 from libcst.metadata import MetadataWrapper, PositionProvider
 
 from ace.uir import UnifiedIssue, create_uir
+
+logger = logging.getLogger(__name__)
 
 
 def analyze_assert_in_nontest(src: str, path: str) -> list[UnifiedIssue]:
@@ -63,9 +66,10 @@ def analyze_assert_in_nontest(src: str, path: str) -> list[UnifiedIssue]:
 
         wrapper.visit(AssertVisitor())
 
-    except Exception:
-        # If parsing fails, return empty list
-        pass
+    except cst.ParserSyntaxError as e:
+        logger.warning(f"Failed to parse {path}: {e}")
+    except (OSError, ValueError) as e:
+        logger.warning(f"Error analyzing {path}: {e}")
 
     return findings
 
@@ -118,9 +122,10 @@ def analyze_print_in_src(src: str, path: str) -> list[UnifiedIssue]:
 
         wrapper.visit(PrintVisitor())
 
-    except Exception:
-        # If parsing fails, return empty list
-        pass
+    except cst.ParserSyntaxError as e:
+        logger.warning(f"Failed to parse {path}: {e}")
+    except (OSError, ValueError) as e:
+        logger.warning(f"Error analyzing {path}: {e}")
 
     return findings
 
@@ -168,8 +173,9 @@ def analyze_eval_exec(src: str, path: str) -> list[UnifiedIssue]:
 
         wrapper.visit(EvalExecVisitor())
 
-    except Exception:
-        # If parsing fails, return empty list
-        pass
+    except cst.ParserSyntaxError as e:
+        logger.warning(f"Failed to parse {path}: {e}")
+    except (OSError, ValueError) as e:
+        logger.warning(f"Error analyzing {path}: {e}")
 
     return findings

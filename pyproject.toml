@@ -30,13 +30,13 @@ dependencies = [
 
 [project.optional-dependencies]
 pro = [
-    "PyNaCl>=1.5.0",
+    "PyNaCl>=1.6.0",
 ]
 ace = [
-    "libcst>=1.4.0",
+    "libcst>=1.5.0",
     "markdown-it-py>=3.0.0",
     "pyyaml>=6.0.1",
-    "textual>=0.41.0",
+    "textual>=0.45.0",
 ]
 test = [
     "pytest>=7.0",
@@ -47,7 +47,7 @@ dev = [
     "black>=23.0",
     "ruff>=0.1.0",
     "mypy>=1.0",
-    "libcst>=1.4.0",
+    "libcst>=1.5.0",
 ]
 all = [
     "acha-code-health[test,dev,pro,ace]",
@@ -159,3 +159,10 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 warn_no_return = true
 follow_imports = "normal"
+
+[tool.pip-audit]
+# Vulnerability scanning configuration
+# Run with: pip-audit
+desc = "ACE vulnerability scanning"
+require-hashes = false
+no-deps = false
