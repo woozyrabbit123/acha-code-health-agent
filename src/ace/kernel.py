@@ -21,6 +21,7 @@ from ace.skills.python import (
     validate_python_syntax,
 )
 from ace.skills.shell import analyze_shell_strict_mode
+from ace.suppressions import filter_findings_by_suppressions, parse_suppressions
 from ace.uir import UnifiedIssue
 
 
@@ -63,33 +64,43 @@ def run_analyze(target_path: Path | str, rules: list[str] | None = None) -> list
             content, _ = read_text_file(file_path, preserve_newlines=False)
             path_str = str(file_path)
 
+            # Parse suppressions for this file
+            suppressions = parse_suppressions(content)
+
+            # Collect findings for this file
+            file_findings = []
+
             # Python rules
             if file_path.suffix == ".py":
                 if should_run_rule("PY-S101-UNSAFE-HTTP"):
-                    all_findings.extend(analyze_py(content, path_str))
+                    file_findings.extend(analyze_py(content, path_str))
                 if should_run_rule("PY-E201-BROAD-EXCEPT"):
-                    all_findings.extend(analyze_broad_except(content, path_str))
+                    file_findings.extend(analyze_broad_except(content, path_str))
                 if should_run_rule("PY-I101-IMPORT-SORT"):
-                    all_findings.extend(analyze_import_sort(content, path_str))
+                    file_findings.extend(analyze_import_sort(content, path_str))
 
             # Markdown rules
             elif file_path.suffix == ".md":
                 if should_run_rule("MD-S001-DANGEROUS-COMMAND"):
-                    all_findings.extend(
+                    file_findings.extend(
                         analyze_markdown_dangerous_commands(content, path_str)
                     )
 
             # YAML rules
             elif file_path.suffix in {".yml", ".yaml"}:
                 if should_run_rule("YML-F001-DUPLICATE-KEY"):
-                    all_findings.extend(analyze_yaml_duplicate_keys(content, path_str))
+                    file_findings.extend(analyze_yaml_duplicate_keys(content, path_str))
 
             # Shell rules
             elif file_path.suffix == ".sh" or (
                 file_path.suffix == "" and content.startswith("#!")
             ):
                 if should_run_rule("SH-S001-MISSING-STRICT-MODE"):
-                    all_findings.extend(analyze_shell_strict_mode(content, path_str))
+                    file_findings.extend(analyze_shell_strict_mode(content, path_str))
+
+            # Filter out suppressed findings
+            file_findings = filter_findings_by_suppressions(file_findings, suppressions)
+            all_findings.extend(file_findings)
 
         except Exception:
             # Skip files that can't be read or analyzed
