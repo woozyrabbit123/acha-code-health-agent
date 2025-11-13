@@ -20,6 +20,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .[dev,test]
+      - name: Security audit (ubuntu only)
+        if: matrix.os == 'ubuntu-latest' && matrix.py == '3.11'
+        run: |
+          pip install pip-audit
+          pip-audit --desc
+      - name: Type check (ubuntu only)
+        if: matrix.os == 'ubuntu-latest' && matrix.py == '3.11'
+        run: mypy src/ace src/acha
       - name: Run tests
         run: pytest -q
       - name: Run linter (ubuntu only)
